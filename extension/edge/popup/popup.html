@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>迅雷去重助手</title>
+  <style>
+    :root {
+      --bg: #eef3f8;
+      --panel: rgba(255, 255, 255, 0.94);
+      --panel-strong: #ffffff;
+      --text: #163047;
+      --muted: #5f7387;
+      --line: rgba(22, 48, 71, 0.12);
+      --blue: #2f82d6;
+      --blue-deep: #205f9f;
+      --green: #1ea56b;
+      --red: #d95c4f;
+      --shadow: 0 18px 40px rgba(21, 46, 70, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 360px;
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(47, 130, 214, 0.22), transparent 42%),
+        linear-gradient(180deg, #edf4fb 0%, #e8eef5 100%);
+    }
+
+    .shell {
+      padding: 18px;
+    }
+
+    .hero {
+      padding: 20px;
+      border-radius: 22px;
+      color: #fff;
+      background:
+        linear-gradient(135deg, rgba(23, 57, 87, 0.92), rgba(47, 130, 214, 0.9)),
+        #204560;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+      letter-spacing: 0.02em;
+    }
+
+    .version {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.88);
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .hero p {
+      margin: 12px 0 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: rgba(255, 255, 255, 0.86);
+    }
+
+    .section {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 10px 24px rgba(21, 46, 70, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(8px);
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .status-card {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .status-label {
+      margin-bottom: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .status-value {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--blue-deep);
+      background: rgba(47, 130, 214, 0.1);
+      transition: 0.2s ease;
+    }
+
+    .status-value::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(47, 130, 214, 0.12);
+    }
+
+    .status-value.connected {
+      color: var(--green);
+      background: rgba(30, 165, 107, 0.12);
+    }
+
+    .status-value.connected::before {
+      box-shadow: 0 0 0 4px rgba(30, 165, 107, 0.12);
+    }
+
+    .status-value.disconnected {
+      color: var(--red);
+      background: rgba(217, 92, 79, 0.12);
+    }
+
+    .status-value.disconnected::before {
+      box-shadow: 0 0 0 4px rgba(217, 92, 79, 0.12);
+    }
+
+    .control-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .control-copy strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .control-copy span {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .toggle-switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 58px;
+      height: 32px;
+      border-radius: 999px;
+      background: rgba(95, 115, 135, 0.28);
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .toggle-switch::after {
+      content: "";
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 4px 10px rgba(22, 48, 71, 0.2);
+      transition: transform 0.2s ease;
+    }
+
+    .toggle-switch.active {
+      background: linear-gradient(135deg, var(--green), #47bf8e);
+    }
+
+    .toggle-switch.active::after {
+      transform: translateX(26px);
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      min-height: 44px;
+      padding: 0 14px;
+      border: none;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      transform: none;
+      opacity: 0.6;
+    }
+
+    .btn-primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--blue), #57a4ee);
+      box-shadow: 0 10px 20px rgba(47, 130, 214, 0.26);
+    }
+
+    .btn-secondary {
+      color: var(--blue-deep);
+      background: rgba(47, 130, 214, 0.1);
+      border: 1px solid rgba(47, 130, 214, 0.16);
+    }
+
+    .footer-note {
+      margin-top: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <h1>迅雷去重助手</h1>
+        <span class="version">v1.0.0</span>
+      </div>
+      <p>复制磁力链前置拦截，确认放行后再交给迅雷。</p>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">当前状态</h2>
+      <div class="status-grid">
+        <article class="status-card">
+          <div class="status-label">桌面应用</div>
+          <div class="status-value disconnected" id="appStatus">未连接</div>
+        </article>
+        <article class="status-card">
+          <div class="status-label">拦截状态</div>
+          <div class="status-value connected" id="interceptStatus">已开启</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">快速操作</h2>
+      <div class="control-card">
+        <div class="control-copy">
+          <strong>启用拦截</strong>
+          <span>关闭后，浏览器复制下载链接时不会再弹出放行确认。</span>
+        </div>
+        <div class="toggle-switch active" id="toggleSwitch" role="switch" aria-checked="true" tabindex="0"></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="testBtn">测试连接</button>
+        <button class="btn btn-secondary" id="openSettingsBtn">打开设置页</button>
+      </div>
+      <div class="footer-note">设置页会在独立标签页打开，不再挤在扩展小窗口里。</div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

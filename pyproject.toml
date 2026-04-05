@@ -1,0 +1,18 @@
+[project]
+name = "thunder-dedupe"
+version = "1.0.0"
+description = "迅雷下载去重拦截工具"
+authors = [
+    {name = "Developer"}
+]
+requires-python = ">=3.8"
+readme = "README.md"
+
+[project.gui-scripts]
+thunder-dedupe = "src.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
