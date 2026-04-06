@@ -35,6 +35,7 @@ class Config:
         "auto_start": False,
         "minimize_to_tray": False,
         "notification_duration": 5,
+        "auto_scan_interval_minutes": 10,
         "scan_paths": [],
     }
 

@@ -2,6 +2,16 @@
  * Chrome extension background service worker.
  */
 const BROWSER_SOURCE = 'chrome';
+const DEBUG_PREFIX = '[Thunder Dedupe][chrome][bg]';
+const IMPORTANT_LOG_MESSAGES = new Set([
+  'websocket opened',
+  'websocket closed',
+  'websocket error',
+  'websocket init failed',
+  'sendCheckRequest',
+  'sendCheckRequest skipped: websocket disconnected',
+  'forwardCheckResult failed',
+]);
 const DEFAULT_CONFIG = {
   WS_PORT: 9876,
   WS_HOST: 'localhost',
@@ -21,13 +31,32 @@ const connectionState = {
   reconnectAttempts: 0,
 };
 
-// 从存储加载配置
+function summarizeValue(value) {
+  if (!value) {
+    return '';
+  }
+
+  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+}
+
+function debugLog(message, details) {
+  if (!IMPORTANT_LOG_MESSAGES.has(message)) {
+    return;
+  }
+
+  if (details === undefined) {
+    console.log(DEBUG_PREFIX, message);
+    return;
+  }
+
+  console.log(DEBUG_PREFIX, message, details);
+}
+
 async function loadConfig() {
   try {
     const stored = await chrome.storage.local.get(['wsPort', 'wsHost']);
     CONFIG.WS_PORT = stored.wsPort || DEFAULT_CONFIG.WS_PORT;
     CONFIG.WS_HOST = stored.wsHost || DEFAULT_CONFIG.WS_HOST;
-    console.log(`[Thunder Dedupe] Config loaded: ws://${CONFIG.WS_HOST}:${CONFIG.WS_PORT}`);
   } catch (error) {
     console.error('[Thunder Dedupe] Failed to load config:', error);
   }
@@ -39,7 +68,6 @@ function initWebSocket() {
   }
 
   const wsUrl = `ws://${CONFIG.WS_HOST}:${CONFIG.WS_PORT}`;
-  console.log(`[Thunder Dedupe] Connecting to ${wsUrl}`);
 
   try {
     ws = new WebSocket(wsUrl);
@@ -50,6 +78,7 @@ function initWebSocket() {
       connectionState.reconnectAttempts = 0;
       startHeartbeat();
       updateIconStatus(true);
+      debugLog('websocket opened');
 
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -63,11 +92,15 @@ function initWebSocket() {
       updateIconStatus(false);
       stopHeartbeat();
       scheduleReconnect();
+      debugLog('websocket closed', {
+        reconnectAttempts: connectionState.reconnectAttempts,
+      });
     };
 
     ws.onerror = (error) => {
       connectionState.lastError = error;
       isConnected = false;
+      debugLog('websocket error', error);
     };
 
     ws.onmessage = (event) => {
@@ -75,6 +108,7 @@ function initWebSocket() {
     };
   } catch (error) {
     connectionState.lastError = error;
+    debugLog('websocket init failed', error);
     scheduleReconnect();
   }
 }
@@ -108,9 +142,7 @@ function scheduleReconnect() {
 }
 
 function updateIconStatus(connected) {
-  const title = connected
-    ? '迅雷去重助手 - 已连接'
-    : '迅雷去重助手 - 未连接';
+  const title = connected ? 'Thunder Dedupe - Connected' : 'Thunder Dedupe - Disconnected';
   chrome.action.setTitle({ title }).catch(() => {});
 }
 
@@ -141,7 +173,9 @@ function forwardCheckResult(data) {
     chrome.tabs.sendMessage(tabs[0].id, {
       type: 'check_result',
       data,
-    }).catch(() => {});
+    }).catch((error) => {
+      debugLog('forwardCheckResult failed', error && error.message ? error.message : error);
+    });
   });
 }
 
@@ -155,8 +189,21 @@ function handleDecision(data) {
 
 function sendCheckRequest(avCode, linkContent, source, options = {}) {
   if (!ws || !isConnected) {
+    debugLog('sendCheckRequest skipped: websocket disconnected', {
+      intercept: Boolean(options.intercept),
+      avCode: avCode || null,
+      source,
+      linkContent: summarizeValue(linkContent),
+    });
     return false;
   }
+
+  debugLog('sendCheckRequest', {
+    intercept: Boolean(options.intercept),
+    avCode: avCode || null,
+    source,
+    linkContent: summarizeValue(linkContent),
+  });
 
   ws.send(
     JSON.stringify({
@@ -235,11 +282,9 @@ chrome.runtime.onStartup.addListener(async () => {
   initWebSocket();
 });
 
-// 监听配置变化
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && (changes.wsPort || changes.wsHost)) {
     loadConfig().then(() => {
-      // 配置变化后重新连接
       if (ws) {
         ws.close();
       }
@@ -248,7 +293,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-// 初始化时加载配置并连接
 loadConfig().then(() => {
   initWebSocket();
 });

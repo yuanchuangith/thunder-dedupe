@@ -3,12 +3,14 @@
 """
 主页 - 拦截状态和日志展示（完整版）
 """
+from datetime import datetime
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QFrame, QMessageBox, QProgressBar
 )
-from PyQt6.QtCore import Qt, QTimer, QDateTime, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from utils.config import config
 from db.database import db
@@ -24,8 +26,8 @@ from utils.logger import logger
 class HomePage(QWidget):
     """主页"""
 
-    # 自动扫描间隔（毫秒）：10分钟
-    AUTO_SCAN_INTERVAL = 10 * 60 * 1000
+    # 自动扫描间隔默认值（分钟）
+    DEFAULT_AUTO_SCAN_INTERVAL_MINUTES = 10
 
     # 扫描完成信号
     scan_completed_signal = pyqtSignal()
@@ -42,7 +44,7 @@ class HomePage(QWidget):
         self.refresh_timer.timeout.connect(self._load_logs)
         self.refresh_timer.start(2000)
 
-        # 自动扫描定时器（每10分钟）
+        # 自动扫描定时器
         self.auto_scan_timer = QTimer()
         self.auto_scan_timer.timeout.connect(self._auto_scan)
 
@@ -64,6 +66,33 @@ class HomePage(QWidget):
 
         # 延迟启动自动扫描（等待UI加载完成）
         QTimer.singleShot(2000, self._startup_scan)
+
+    def _get_auto_scan_interval_minutes(self) -> int:
+        """获取自动扫描间隔（分钟）。"""
+        try:
+            interval = int(
+                config.get(
+                    "auto_scan_interval_minutes",
+                    self.DEFAULT_AUTO_SCAN_INTERVAL_MINUTES,
+                )
+            )
+        except (TypeError, ValueError):
+            interval = self.DEFAULT_AUTO_SCAN_INTERVAL_MINUTES
+
+        return max(1, interval)
+
+    def _get_auto_scan_interval_ms(self) -> int:
+        """获取自动扫描间隔（毫秒）。"""
+        return self._get_auto_scan_interval_minutes() * 60 * 1000
+
+    def reload_auto_scan_interval(self):
+        """在配置保存后刷新自动扫描定时器。"""
+        if not self.auto_scan_timer.isActive():
+            return
+
+        interval_minutes = self._get_auto_scan_interval_minutes()
+        self.auto_scan_timer.start(self._get_auto_scan_interval_ms())
+        logger.info(f"已更新自动扫描间隔（每{interval_minutes}分钟）")
 
     def _setup_ui(self):
         """设置界面"""
@@ -366,7 +395,7 @@ class HomePage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
 
-        table.setColumnWidth(0, 100)
+        table.setColumnWidth(0, 170)
         table.setColumnWidth(2, 100)
         table.setColumnWidth(3, 100)
         table.setColumnWidth(4, 100)
@@ -459,8 +488,9 @@ class HomePage(QWidget):
             self._start_scan_internal()
 
             # 启动定时自动扫描
-            self.auto_scan_timer.start(self.AUTO_SCAN_INTERVAL)
-            logger.info("已启动定时自动扫描（每10分钟）")
+            interval_minutes = self._get_auto_scan_interval_minutes()
+            self.auto_scan_timer.start(self._get_auto_scan_interval_ms())
+            logger.info(f"已启动定时自动扫描（每{interval_minutes}分钟）")
 
     def _start_scan(self):
         """手动开始扫描"""
@@ -596,6 +626,7 @@ class HomePage(QWidget):
         av_code = data.get("av_code", "")
         source = data.get("source", "chrome")
         logger.info(f"Received browser intercept request: source={source}, av_code={av_code}")
+
         clipboard_monitor.stage_link(link_content, av_code)
 
         result = show_decision_popup(
@@ -627,7 +658,7 @@ class HomePage(QWidget):
         rows = db.query("""
             SELECT id, av_code, source, status, user_action, created_at
             FROM intercept_logs
-            ORDER BY created_at DESC
+            ORDER BY datetime(created_at) DESC, id DESC
             LIMIT 50
         """)
 
@@ -638,10 +669,11 @@ class HomePage(QWidget):
             time_str = row['created_at']
             if time_str:
                 try:
-                    dt = QDateTime.fromString(time_str, Qt.DateFormat.ISODate)
-                    time_display = dt.toString("HH:mm")
+                    dt = datetime.fromisoformat(str(time_str).replace("T", " "))
+                    time_display = dt.strftime("%Y-%m-%d %H:%M:%S")
                 except:
-                    time_display = time_str[:5] if len(time_str) >= 5 else time_str
+                    normalized_time = str(time_str).replace("T", " ")
+                    time_display = normalized_time[:19] if len(normalized_time) >= 19 else normalized_time
             else:
                 time_display = ""
             self.log_table.setItem(i, 0, QTableWidgetItem(time_display))

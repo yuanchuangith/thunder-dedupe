@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem,
     QFrame, QCheckBox, QSpinBox, QFileDialog,
-    QMessageBox, QLineEdit, QScrollArea, QSizePolicy
+    QMessageBox, QLineEdit, QScrollArea, QSizePolicy, QApplication
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QPixmap, QFont
@@ -517,6 +517,61 @@ class ConfigPage(QWidget):
         duration_row.addStretch()
         layout.addLayout(duration_row)
 
+        # 自动扫描间隔
+        auto_scan_row = QHBoxLayout()
+        auto_scan_row.setSpacing(12)
+
+        auto_scan_label = QLabel("自动扫描间隔")
+        auto_scan_label.setMinimumWidth(100)
+        auto_scan_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #2c3e50;
+            }
+        """)
+        auto_scan_row.addWidget(auto_scan_label)
+
+        self.auto_scan_interval_spin = QSpinBox()
+        self.auto_scan_interval_spin.setRange(1, 1440)
+        self.auto_scan_interval_spin.setValue(config.get("auto_scan_interval_minutes", 10))
+        self.auto_scan_interval_spin.setSuffix(" 分钟")
+        self.auto_scan_interval_spin.setMinimumSize(120, 36)
+        self.auto_scan_interval_spin.setStyleSheet("""
+            QSpinBox {
+                border: 1px solid #e1e5e9;
+                border-radius: 8px;
+                padding: 6px 10px;
+                background: #f8f9fa;
+                font-size: 13px;
+                color: #2c3e50;
+            }
+            QSpinBox:focus {
+                border: 2px solid #3498db;
+                background: #ffffff;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 20px;
+                border-radius: 4px;
+                background: #e1e5e9;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background: #3498db;
+            }
+        """)
+        auto_scan_row.addWidget(self.auto_scan_interval_spin)
+
+        auto_scan_tip = QLabel("（监控运行时会按这个间隔自动扫描已配置目录）")
+        auto_scan_tip.setStyleSheet("""
+            QLabel {
+                color: #95a5a6;
+                font-size: 12px;
+            }
+        """)
+        auto_scan_row.addWidget(auto_scan_tip)
+
+        auto_scan_row.addStretch()
+        layout.addLayout(auto_scan_row)
+
         # WebSocket 端口
         ws_port_row = QHBoxLayout()
         ws_port_row.setSpacing(12)
@@ -716,6 +771,7 @@ class ConfigPage(QWidget):
         config.set("auto_start", self.auto_start_cb.isChecked())
         config.set("minimize_to_tray", self.tray_cb.isChecked())
         config.set("notification_duration", self.duration_spin.value())
+        config.set("auto_scan_interval_minutes", self.auto_scan_interval_spin.value())
         config.set("ws_port", self.ws_port_spin.value())
 
         tray_icon_path = self.tray_icon_edit.text().strip()
@@ -727,12 +783,29 @@ class ConfigPage(QWidget):
         if tray_icon_path and os.path.exists(tray_icon_path):
             self._apply_tray_icon(tray_icon_path)
 
-        QMessageBox.information(self, "成功", "配置已保存\n\n注意：WebSocket 端口修改后需要重启监控才能生效")
+        self._apply_runtime_settings()
+
+        QMessageBox.information(
+            self,
+            "成功",
+            "配置已保存\n\n自动扫描间隔会立即生效；WebSocket 端口修改后需要重启监控才能生效",
+        )
+
+    def _apply_runtime_settings(self):
+        """将可热更新的配置立即同步到运行中的界面。"""
+        app = QApplication.instance()
+        if not app:
+            return
+
+        for widget in app.topLevelWidgets():
+            home_page = getattr(widget, "home_page", None)
+            if home_page and hasattr(home_page, "reload_auto_scan_interval"):
+                home_page.reload_auto_scan_interval()
+                break
 
     def _apply_tray_icon(self, icon_path: str):
         """应用任务栏图标"""
         try:
-            from PyQt6.QtWidgets import QApplication
             from PyQt6.QtGui import QIcon
 
             app = QApplication.instance()
@@ -763,11 +836,22 @@ class ConfigPage(QWidget):
             self.auto_start_cb.setChecked(False)
             self.tray_cb.setChecked(False)
             self.duration_spin.setValue(5)
+            self.auto_scan_interval_spin.setValue(10)
             self.ws_port_spin.setValue(9876)
 
             self.tray_icon_edit.clear()
             self.desktop_icon_edit.clear()
 
+            config.set("auto_start", False, auto_save=False)
+            config.set("minimize_to_tray", False, auto_save=False)
+            config.set("notification_duration", 5, auto_save=False)
+            config.set("auto_scan_interval_minutes", 10, auto_save=False)
+            config.set("ws_port", 9876, auto_save=False)
+            config.set("tray_icon_path", "", auto_save=False)
+            config.set("desktop_icon_path", "", auto_save=False)
+            config.save()
+
             db.execute("DELETE FROM file_index")
+            self._apply_runtime_settings()
 
             QMessageBox.information(self, "成功", "配置已重置")

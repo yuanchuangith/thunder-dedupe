@@ -8,64 +8,129 @@
   'use strict';
 
   const BROWSER_SOURCE = 'chrome';
+  const DEBUG_PREFIX = '[Thunder Dedupe][chrome][content]';
+  const PAGE_HOOK_PREFIX = '[Thunder Dedupe][chrome][page-hook]';
   const COPY_PLACEHOLDER = '[Thunder Dedupe] Link intercepted. Allow it in the desktop app.';
+  const IMPORTANT_LOG_MESSAGES = new Set([
+    'content script loaded',
+    'copy intercepted',
+    'page clipboard api intercepted',
+    'send check_link',
+    'check_link response',
+    'received check_result',
+    'received intercept_decision',
+    'extension context invalidated before sendMessage',
+    'runtime message failed',
+    'sendMessage threw',
+    'storage.get callback failed',
+    'storage.get threw',
+  ]);
+  const DOWNLOAD_LINK_PATTERNS = [
+    /^thunder:\/\/[A-Za-z0-9+/=]+/,
+    /^magnet:\?xt=urn:btih:[A-Za-z0-9]+/i,
+    /^ed2k:\/\/\|file\|/i,
+    /\.(torrent|mp4|mkv|avi|wmv|flv)$/i,
+  ];
+  const AV_CODE_PATTERNS = [
+    /[A-Z]{2,6}-\d{3,5}/i,
+    /[A-Z]{2,6}\d{3,5}/i,
+    /[A-Z]{3,6}-\d{2,4}/i,
+  ];
+
   const processedLinks = new Set();
   let appConnected = null;
+  let interceptEnabled = true;
 
-  function injectPageClipboardHook() {
-    const script = document.createElement('script');
-    script.textContent = `
-      (() => {
-        if (window.__thunderDedupeClipboardHookInstalled) {
-          return;
-        }
-        window.__thunderDedupeClipboardHookInstalled = true;
+  function summarizeValue(value) {
+    if (!value) {
+      return '';
+    }
 
-        const placeholder = ${JSON.stringify(COPY_PLACEHOLDER)};
-        const isDownloadLink = (value) => {
-          if (!value || typeof value !== 'string') {
-            return false;
-          }
-
-          return [
-            /^thunder:\\/\\/[A-Za-z0-9+/=]+/,
-            /^magnet:\\?xt=urn:btih:[A-Za-z0-9]+/i,
-            /^ed2k:\\/\\/\\|file\\|/i
-          ].some((pattern) => pattern.test(value));
-        };
-
-        const postIntercept = (text) => {
-          window.postMessage({
-            source: 'thunder-dedupe-page',
-            type: 'clipboard-write-intercept',
-            text
-          }, '*');
-        };
-
-        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-          const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
-          navigator.clipboard.writeText = function(text) {
-            if (isDownloadLink(text)) {
-              postIntercept(text);
-              return originalWriteText(placeholder);
-            }
-            return originalWriteText(text);
-          };
-        }
-      })();
-    `;
-
-    (document.documentElement || document.head || document.body).appendChild(script);
-    script.remove();
+    return value.length > 120 ? `${value.slice(0, 117)}...` : value;
   }
 
-  function refreshStatus() {
-    chrome.runtime.sendMessage({ type: 'get_status' }, (response) => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-      appConnected = Boolean(response && response.connected);
-    });
+  function debugLog(message, details) {
+    if (!IMPORTANT_LOG_MESSAGES.has(message)) {
+      return;
+    }
+
+    if (details === undefined) {
+      console.log(DEBUG_PREFIX, message);
+      return;
+    }
+
+    console.log(DEBUG_PREFIX, message, details);
+  }
+
+  function isExtensionContextValid() {
+    try {
+      return typeof chrome !== 'undefined' && Boolean(chrome.runtime && chrome.runtime.id);
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function safeStorageGet(keys, callback) {
+    if (!isExtensionContextValid() || !chrome.storage || !chrome.storage.local) {
+      debugLog('extension context unavailable for storage.get');
+      return false;
+    }
+
+    try {
+      chrome.storage.local.get(keys, (data) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          debugLog('storage.get callback failed', chrome.runtime.lastError.message);
+          return;
+        }
+
+        callback(data || {});
+      });
+      return true;
+    } catch (error) {
+      debugLog('storage.get threw', error && error.message ? error.message : String(error));
+      return false;
+    }
+  }
+
+  function safeSendRuntimeMessage(message, callback) {
+    if (!isExtensionContextValid()) {
+      debugLog('extension context invalidated before sendMessage', { type: message.type });
+      return false;
+    }
+
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          debugLog('runtime message failed', {
+            type: message.type,
+            error: chrome.runtime.lastError.message,
+          });
+          if (callback) {
+            callback(null, chrome.runtime.lastError);
+          }
+          return;
+        }
+
+        if (callback) {
+          callback(response, null);
+        }
+      });
+      return true;
+    } catch (error) {
+      debugLog('sendMessage threw', {
+        type: message.type,
+        error: error && error.message ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  function isDownloadLink(value) {
+    if (!value) {
+      return false;
+    }
+
+    return DOWNLOAD_LINK_PATTERNS.some((pattern) => pattern.test(value));
   }
 
   function extractAvCode(text) {
@@ -73,13 +138,7 @@
       return null;
     }
 
-    const patterns = [
-      /[A-Z]{2,6}-\d{3,5}/i,
-      /[A-Z]{2,6}\d{3,5}/i,
-      /[A-Z]{3,6}-\d{2,4}/i,
-    ];
-
-    for (const pattern of patterns) {
+    for (const pattern of AV_CODE_PATTERNS) {
       const match = text.match(pattern);
       if (match) {
         return match[0].toUpperCase().replace(/([A-Z]+)(\d+)/, '$1-$2');
@@ -87,21 +146,6 @@
     }
 
     return null;
-  }
-
-  function isDownloadLink(url) {
-    if (!url) {
-      return false;
-    }
-
-    const patterns = [
-      /^thunder:\/\/[A-Za-z0-9+/=]+/,
-      /^magnet:\?xt=urn:btih:[A-Za-z0-9]+/i,
-      /^ed2k:\/\/\|file\|/i,
-      /\.(torrent|mp4|mkv|avi|wmv|flv)$/i,
-    ];
-
-    return patterns.some((pattern) => pattern.test(url));
   }
 
   function showNotification(message, type = 'info') {
@@ -131,24 +175,203 @@
     }, 3000);
   }
 
+  function loadInterceptSetting() {
+    safeStorageGet('enabled', (data) => {
+      interceptEnabled = data.enabled !== false;
+      debugLog('intercept setting loaded', { enabled: interceptEnabled });
+    });
+  }
+
+  function installStorageListener() {
+    if (!isExtensionContextValid() || !chrome.storage || !chrome.storage.onChanged) {
+      debugLog('extension context unavailable for storage listener');
+      return;
+    }
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local' || !changes.enabled) {
+        return;
+      }
+
+      interceptEnabled = changes.enabled.newValue !== false;
+      debugLog('intercept setting changed', { enabled: interceptEnabled });
+    });
+  }
+
+  function injectPageClipboardHook() {
+    const installHook = () => {
+      const script = document.createElement('script');
+      script.textContent = `
+        (() => {
+          const debugPrefix = ${JSON.stringify(PAGE_HOOK_PREFIX)};
+          const placeholder = ${JSON.stringify(COPY_PLACEHOLDER)};
+
+          const log = (message, details) => {
+            if (details === undefined) {
+              console.log(debugPrefix, message);
+              return;
+            }
+
+            console.log(debugPrefix, message, details);
+          };
+
+          if (window.__thunderDedupeClipboardHookInstalled) {
+            return;
+          }
+          window.__thunderDedupeClipboardHookInstalled = true;
+
+          const isDownloadLink = (value) => {
+            if (!value || typeof value !== 'string') {
+              return false;
+            }
+
+            return [
+              /^thunder:\\/\\/[A-Za-z0-9+/=]+/,
+              /^magnet:\\?xt=urn:btih:[A-Za-z0-9]+/i,
+              /^ed2k:\\/\\/\\|file\\|/i,
+              /\\.(torrent|mp4|mkv|avi|wmv|flv)$/i
+            ].some((pattern) => pattern.test(value));
+          };
+
+          const postIntercept = (text, path) => {
+            log('clipboard api intercepted', {
+              path,
+              preview: typeof text === 'string' ? text.slice(0, 120) : ''
+            });
+
+            window.postMessage({
+              source: 'thunder-dedupe-page',
+              type: 'clipboard-write-intercept',
+              text,
+              path
+            }, '*');
+          };
+
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+            navigator.clipboard.writeText = function(text) {
+              if (isDownloadLink(text)) {
+                postIntercept(text, 'writeText');
+                return originalWriteText(placeholder);
+              }
+              return originalWriteText(text);
+            };
+          }
+
+          const readClipboardItems = async (items) => {
+            if (!Array.isArray(items)) {
+              return null;
+            }
+
+            for (const item of items) {
+              if (!item || !Array.isArray(item.types) || !item.types.includes('text/plain')) {
+                continue;
+              }
+
+              try {
+                const blob = await item.getType('text/plain');
+                const text = await blob.text();
+                if (isDownloadLink(text)) {
+                  return text;
+                }
+              } catch (error) {
+                log('failed to inspect ClipboardItem', error);
+              }
+            }
+
+            return null;
+          };
+
+          const buildPlaceholderItems = () => {
+            if (typeof ClipboardItem !== 'function') {
+              return null;
+            }
+
+            try {
+              return [
+                new ClipboardItem({
+                  'text/plain': new Blob([placeholder], { type: 'text/plain' })
+                })
+              ];
+            } catch (error) {
+              log('failed to build placeholder ClipboardItem', error);
+              return null;
+            }
+          };
+
+          if (navigator.clipboard && typeof navigator.clipboard.write === 'function') {
+            const originalWrite = navigator.clipboard.write.bind(navigator.clipboard);
+            navigator.clipboard.write = async function(items) {
+              const interceptedText = await readClipboardItems(items);
+              if (!interceptedText) {
+                return originalWrite(items);
+              }
+
+              postIntercept(interceptedText, 'write');
+
+              if (typeof navigator.clipboard.writeText === 'function') {
+                return navigator.clipboard.writeText(placeholder);
+              }
+
+              const placeholderItems = buildPlaceholderItems();
+              if (placeholderItems) {
+                return originalWrite(placeholderItems);
+              }
+
+              return originalWrite(items);
+            };
+          }
+        })();
+      `;
+
+      (document.documentElement || document.head || document.body).appendChild(script);
+      script.remove();
+    };
+
+    if (document.documentElement || document.head || document.body) {
+      installHook();
+      return;
+    }
+
+    document.addEventListener('readystatechange', installHook, { once: true });
+  }
+
+  function refreshStatus() {
+    safeSendRuntimeMessage({ type: 'get_status' }, (response, error) => {
+      if (error) {
+        appConnected = false;
+        return;
+      }
+
+      appConnected = Boolean(response && response.connected);
+      debugLog('refreshStatus', { connected: appConnected });
+    });
+  }
+
   function checkLink(url, avCode, options = {}) {
-    chrome.runtime.sendMessage(
+    debugLog('send check_link', {
+      intercept: Boolean(options.intercept),
+      avCode: avCode || null,
+      url: summarizeValue(url),
+    });
+
+    safeSendRuntimeMessage(
       {
         type: 'check_link',
         linkContent: url,
-        avCode: avCode,
+        avCode,
         source: BROWSER_SOURCE,
         intercept: Boolean(options.intercept),
       },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Thunder Dedupe] Send failed:', chrome.runtime.lastError);
+      (response, error) => {
+        if (error) {
           return;
         }
 
         appConnected = Boolean(response && response.connected);
+        debugLog('check_link response', response || null);
         if (!appConnected) {
-          showNotification('桌面应用未连接，本次复制没有进入放行流程', 'warning');
+          showNotification('Desktop app is not connected, this copy stayed unchanged.', 'warning');
         }
       }
     );
@@ -182,6 +405,7 @@
       return {
         url: selectedText,
         avCode: extractAvCode(selectedText),
+        path: 'selectedText',
       };
     }
 
@@ -190,6 +414,7 @@
       return {
         url: selectedAnchor.href,
         avCode: extractAvCode(selectedAnchor.href) || extractAvCode(selectedAnchor.textContent || ''),
+        path: 'selectedAnchor',
       };
     }
 
@@ -198,6 +423,7 @@
       return {
         url: pendingLink,
         avCode: extractAvCode(pendingLink),
+        path: 'contextMenuPendingLink',
       };
     }
 
@@ -206,7 +432,7 @@
 
   function interceptClick(event) {
     let target = event.target;
-    if (target.tagName !== 'A' && target.closest) {
+    if (target && target.tagName !== 'A' && target.closest) {
       target = target.closest('a');
     }
 
@@ -226,21 +452,41 @@
 
     const linkText = target.textContent || '';
     const avCode = extractAvCode(href) || extractAvCode(linkText);
+    debugLog('download link clicked', {
+      avCode,
+      url: summarizeValue(href),
+    });
     checkLink(href, avCode, { intercept: false });
-
-    if (avCode) {
-      showNotification(`检测到番号 ${avCode}，正在检查`, 'info');
-    }
   }
 
   function interceptCopy(event) {
     const copied = resolveCopiedLink();
     if (!copied) {
+      const selectedText = getSelectedText();
+      const pendingLink = window.__thunderDedupePendingLink || '';
+      if (selectedText || pendingLink) {
+        debugLog('copy event fired but no downloadable link resolved', {
+          selectedText: summarizeValue(selectedText),
+          pendingLink: summarizeValue(pendingLink),
+        });
+      }
+      return;
+    }
+
+    if (!interceptEnabled) {
+      debugLog('copy detected but front interception is disabled', {
+        avCode: copied.avCode || null,
+        path: copied.path,
+      });
       return;
     }
 
     if (appConnected === false) {
-      showNotification('桌面应用未连接，本次复制保持原样', 'warning');
+      debugLog('copy detected but desktop app is disconnected', {
+        avCode: copied.avCode || null,
+        url: summarizeValue(copied.url),
+      });
+      showNotification('Desktop app is not connected, this copy stayed unchanged.', 'warning');
       return;
     }
 
@@ -253,8 +499,14 @@
     event.stopPropagation();
 
     window.__thunderDedupePendingLink = null;
+    debugLog('copy intercepted', {
+      avCode: copied.avCode || null,
+      path: copied.path,
+      url: summarizeValue(copied.url),
+      connected: appConnected,
+    });
     checkLink(copied.url, copied.avCode, { intercept: true });
-    showNotification('已拦截复制，等待桌面端放行后再交给迅雷', 'warning');
+    showNotification('Copy intercepted. Wait for desktop approval before Thunder reads it.', 'warning');
   }
 
   window.addEventListener('message', (event) => {
@@ -272,8 +524,21 @@
       return;
     }
 
+    if (!interceptEnabled) {
+      debugLog('page clipboard api detected but front interception is disabled', {
+        path: data.path || 'unknown',
+        url: summarizeValue(text),
+      });
+      return;
+    }
+
+    debugLog('page clipboard api intercepted', {
+      path: data.path || 'unknown',
+      avCode: extractAvCode(text),
+      url: summarizeValue(text),
+    });
     checkLink(text, extractAvCode(text), { intercept: true });
-    showNotification('网页复制按钮已拦截，等待桌面端放行', 'warning');
+    showNotification('Page clipboard API intercepted. Wait for desktop approval.', 'warning');
   });
 
   document.addEventListener(
@@ -288,12 +553,15 @@
     'contextmenu',
     (event) => {
       let target = event.target;
-      if (target.tagName !== 'A' && target.closest) {
+      if (target && target.tagName !== 'A' && target.closest) {
         target = target.closest('a');
       }
 
       if (target && target.tagName === 'A' && isDownloadLink(target.href)) {
         window.__thunderDedupePendingLink = target.href;
+        debugLog('context menu captured link candidate', {
+          url: summarizeValue(target.href),
+        });
       } else {
         window.__thunderDedupePendingLink = null;
       }
@@ -301,39 +569,44 @@
     true
   );
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    switch (message.type) {
-      case 'check_result':
-        handleCheckResult(message.data);
-        break;
-      case 'intercept_decision':
-        handleInterceptDecision(message.data);
-        break;
-      default:
-        break;
-    }
+  if (isExtensionContextValid() && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      switch (message.type) {
+        case 'check_result':
+          handleCheckResult(message.data);
+          break;
+        case 'intercept_decision':
+          handleInterceptDecision(message.data);
+          break;
+        default:
+          break;
+      }
 
-    sendResponse({ received: true });
-    return true;
-  });
+      sendResponse({ received: true });
+      return true;
+    });
+  } else {
+    debugLog('extension context unavailable for runtime message listener');
+  }
 
   function handleCheckResult(data) {
     if (!data) {
       return;
     }
 
+    debugLog('received check_result', data);
     const { av_code: avCode, exists, file_path: filePath, error } = data;
     if (error) {
-      showNotification(`链接已拦截，等待桌面端放行`, 'warning');
+      showNotification('Link intercepted. Waiting for desktop approval.', 'warning');
       return;
     }
 
     if (exists) {
-      showNotification(`番号 ${avCode} 已存在：${filePath}`, 'warning');
+      showNotification(`Code ${avCode} already exists: ${filePath}`, 'warning');
     } else if (avCode) {
-      showNotification(`番号 ${avCode} 未下载，可决定是否放行`, 'info');
+      showNotification(`Code ${avCode} not found. You can decide whether to allow it.`, 'info');
     } else {
-      showNotification('链接已拦截，等待桌面端放行', 'warning');
+      showNotification('Link intercepted. Waiting for desktop approval.', 'warning');
     }
   }
 
@@ -342,16 +615,21 @@
       return;
     }
 
+    debugLog('received intercept_decision', data);
     const { action, av_code: avCode } = data;
     if (action === 'allow') {
-      showNotification(`已放行 ${avCode || '当前链接'}`, 'info');
+      showNotification(`Allowed: ${avCode || 'current link'}`, 'info');
     } else if (action === 'block') {
-      showNotification(`已拦截 ${avCode || '当前链接'}`, 'warning');
+      showNotification(`Blocked: ${avCode || 'current link'}`, 'warning');
     }
   }
 
   document.addEventListener('click', interceptClick, true);
+
+  debugLog('content script loaded', { url: location.href });
   injectPageClipboardHook();
+  loadInterceptSetting();
+  installStorageListener();
   refreshStatus();
   setInterval(refreshStatus, 5000);
 })();

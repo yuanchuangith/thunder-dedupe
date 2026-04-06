@@ -3,10 +3,12 @@
 """
 Decision popup shown after intercepting a download link.
 """
+from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -33,7 +35,7 @@ class DecisionPopup(QDialog):
         av_code: str = "",
         source: str = "clipboard",
     ):
-        super().__init__(parent)
+        super().__init__(None)
 
         self._link_content = link_content
         self._av_code = av_code or ""
@@ -54,10 +56,15 @@ class DecisionPopup(QDialog):
         self.setWindowTitle("检测到下载链接")
         self.setFixedSize(420, 260)
         self.setWindowFlags(
-            Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
         )
+        self.setModal(True)
 
-        screen = self.screen()
+        screen = self.screen() or QApplication.primaryScreen()
         if screen:
             geometry = screen.availableGeometry()
             x = geometry.x() + (geometry.width() - self.width()) // 2
@@ -307,8 +314,8 @@ class DecisionPopup(QDialog):
         db.execute(
             """
             INSERT INTO intercept_logs
-            (av_code, source, file_name, status, user_action, user_decision)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (av_code, source, file_name, status, user_action, user_decision, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._av_code or None,
@@ -317,6 +324,7 @@ class DecisionPopup(QDialog):
                 self._status,
                 action,
                 user_decision,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
 
