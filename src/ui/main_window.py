@@ -14,8 +14,10 @@ from ui.config_page import ConfigPage
 from ui.console_page import ConsolePage
 from ui.duplicate_page import DuplicatePage
 from ui.file_list_page import FileListPage
+from ui.file_history_page import FileHistoryPage
 from ui.home_page import HomePage
 from ui.rule_page import RulePage
+from core.index_manager import index_manager
 from utils.config import config
 from utils.logger import logger
 
@@ -27,6 +29,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         init_database()
+        index_manager.refresh_search_index()
 
         self._setup_window()
         self._setup_ui()
@@ -83,6 +86,9 @@ class MainWindow(QMainWindow):
         self.file_list_page = FileListPage()
         self.tab_widget.addTab(self.file_list_page, "文件列表")
 
+        self.file_history_page = FileHistoryPage()
+        self.tab_widget.addTab(self.file_history_page, "文件历史")
+
         self.duplicate_page = DuplicatePage()
         self.tab_widget.addTab(self.duplicate_page, "重复检测")
 
@@ -103,6 +109,7 @@ class MainWindow(QMainWindow):
 
     def _on_scan_completed(self):
         self.file_list_page.refresh()
+        self.file_history_page.refresh()
         self.duplicate_page.refresh()
 
     def _create_header(self) -> QWidget:

@@ -379,15 +379,25 @@ class ConfigPage(QWidget):
         layout.addLayout(desktop_row)
 
         # 提示
-        tip = QLabel("💡 支持 .ico 和 .png 格式，推荐使用 .ico 格式以获得最佳显示效果")
-        tip.setStyleSheet("""
+        tip1 = QLabel("💡 任务栏图标：保存后立即生效，支持 .ico 和 .png 格式")
+        tip1.setStyleSheet("""
             QLabel {
-                color: #95a5a6;
+                color: #7f8c8d;
                 font-size: 12px;
-                padding: 5px 0px;
+                padding: 2px 0px;
             }
         """)
-        layout.addWidget(tip)
+        layout.addWidget(tip1)
+
+        tip2 = QLabel("💡 桌面图标：仅用于打包时指定 exe 图标，运行时修改无效")
+        tip2.setStyleSheet("""
+            QLabel {
+                color: #e67e22;
+                font-size: 12px;
+                padding: 2px 0px;
+            }
+        """)
+        layout.addWidget(tip2)
 
         return card
 
@@ -627,6 +637,157 @@ class ConfigPage(QWidget):
         ws_port_row.addStretch()
         layout.addLayout(ws_port_row)
 
+        # 视频扩展名
+        video_ext_row = QHBoxLayout()
+        video_ext_row.setSpacing(12)
+
+        video_ext_label = QLabel("额外视频扩展名")
+        video_ext_label.setMinimumWidth(100)
+        video_ext_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #2c3e50;
+            }
+        """)
+        video_ext_row.addWidget(video_ext_label)
+
+        self.video_ext_edit = QLineEdit()
+        self.video_ext_edit.setPlaceholderText("如: .iso, .webm")
+        default_video_ext = config.format_extensions(config.get_extra_video_extensions())
+        self.video_ext_edit.setText(default_video_ext)
+        self.video_ext_edit.setMinimumHeight(36)
+        self.video_ext_edit.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #e1e5e9;
+                border-radius: 8px;
+                padding: 8px 12px;
+                background: #f8f9fa;
+                font-size: 13px;
+                color: #2c3e50;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background: #ffffff;
+            }
+        """)
+        video_ext_row.addWidget(self.video_ext_edit, 1)
+
+        video_ext_tip = QLabel(
+            f"（只填写你额外添加的扩展名；内置默认始终启用：{config.format_extensions(config.get_default_video_extensions())}）"
+        )
+        video_ext_tip.setStyleSheet("""
+            QLabel {
+                color: #95a5a6;
+                font-size: 12px;
+            }
+        """)
+        video_ext_tip.setWordWrap(True)
+        video_ext_row.addWidget(video_ext_tip)
+        layout.addLayout(video_ext_row)
+
+        # 临时下载扩展名
+        temp_ext_row = QHBoxLayout()
+        temp_ext_row.setSpacing(12)
+
+        temp_ext_label = QLabel("额外临时文件扩展名")
+        temp_ext_label.setMinimumWidth(100)
+        temp_ext_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #2c3e50;
+            }
+        """)
+        temp_ext_row.addWidget(temp_ext_label)
+
+        self.temp_ext_edit = QLineEdit()
+        self.temp_ext_edit.setPlaceholderText("如: .part, .crdownload")
+        default_temp_ext = config.format_extensions(config.get_extra_temp_extensions())
+        self.temp_ext_edit.setText(default_temp_ext)
+        self.temp_ext_edit.setMinimumHeight(36)
+        self.temp_ext_edit.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #e1e5e9;
+                border-radius: 8px;
+                padding: 8px 12px;
+                background: #f8f9fa;
+                font-size: 13px;
+                color: #2c3e50;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background: #ffffff;
+            }
+        """)
+        temp_ext_row.addWidget(self.temp_ext_edit, 1)
+
+        temp_ext_tip = QLabel(
+            f"（只填写你额外添加的临时扩展名；内置默认始终启用：{config.format_extensions(config.get_default_temp_extensions())}）"
+        )
+        temp_ext_tip.setStyleSheet("""
+            QLabel {
+                color: #95a5a6;
+                font-size: 12px;
+            }
+        """)
+        temp_ext_tip.setWordWrap(True)
+        temp_ext_row.addWidget(temp_ext_tip)
+        layout.addLayout(temp_ext_row)
+
+        # 允许下载后延迟扫描时间
+        post_scan_row = QHBoxLayout()
+        post_scan_row.setSpacing(12)
+
+        post_scan_label = QLabel("下载后扫描延迟")
+        post_scan_label.setMinimumWidth(100)
+        post_scan_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #2c3e50;
+            }
+        """)
+        post_scan_row.addWidget(post_scan_label)
+
+        self.post_scan_spin = QSpinBox()
+        self.post_scan_spin.setRange(5, 300)
+        self.post_scan_spin.setValue(config.get("post_allow_scan_delay_seconds", 30))
+        self.post_scan_spin.setSuffix(" 秒")
+        self.post_scan_spin.setMinimumSize(120, 36)
+        self.post_scan_spin.setStyleSheet("""
+            QSpinBox {
+                border: 1px solid #e1e5e9;
+                border-radius: 8px;
+                padding: 6px 10px;
+                background: #f8f9fa;
+                font-size: 13px;
+                color: #2c3e50;
+            }
+            QSpinBox:focus {
+                border: 2px solid #3498db;
+                background: #ffffff;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 20px;
+                border-radius: 4px;
+                background: #e1e5e9;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background: #3498db;
+            }
+        """)
+        post_scan_row.addWidget(self.post_scan_spin)
+
+        post_scan_tip = QLabel("（允许下载后延迟多久自动扫描索引，防抖设计避免重复扫描）")
+        post_scan_tip.setStyleSheet("""
+            QLabel {
+                color: #95a5a6;
+                font-size: 12px;
+            }
+        """)
+        post_scan_row.addWidget(post_scan_tip)
+
+        post_scan_row.addStretch()
+        layout.addLayout(post_scan_row)
+
         return card
 
     def _create_buttons_card(self) -> QFrame:
@@ -780,6 +941,15 @@ class ConfigPage(QWidget):
         config.set("tray_icon_path", tray_icon_path)
         config.set("desktop_icon_path", desktop_icon_path)
 
+        # 保存额外扩展名配置
+        video_ext = self.video_ext_edit.text().strip()
+        temp_ext = self.temp_ext_edit.text().strip()
+        config.set_extra_video_extensions(video_ext)
+        config.set_extra_temp_extensions(temp_ext)
+
+        # 保存下载后扫描延迟配置
+        config.set("post_allow_scan_delay_seconds", self.post_scan_spin.value())
+
         if tray_icon_path and os.path.exists(tray_icon_path):
             self._apply_tray_icon(tray_icon_path)
 
@@ -806,17 +976,36 @@ class ConfigPage(QWidget):
     def _apply_tray_icon(self, icon_path: str):
         """应用任务栏图标"""
         try:
-            from PyQt6.QtGui import QIcon
+            from PyQt6.QtGui import QIcon, QPixmap
+            from PyQt6.QtWidgets import QApplication
 
             app = QApplication.instance()
-            if app:
-                icon = QIcon(icon_path)
-                app.setWindowIcon(icon)
+            if not app:
+                return
 
-                for widget in app.topLevelWidgets():
-                    widget.setWindowIcon(icon)
+            # 加载图标
+            icon = QIcon(icon_path)
+            if icon.isNull():
+                logger.error(f"图标加载失败: {icon_path}")
+                return
 
-                logger.info(f"已应用任务栏图标: {icon_path}")
+            # 设置应用程序图标
+            app.setWindowIcon(icon)
+
+            # 设置所有顶层窗口图标
+            for widget in app.topLevelWidgets():
+                widget.setWindowIcon(icon)
+
+            # Windows 任务栏图标需要设置 AppUserModelID
+            try:
+                import ctypes
+                app_id = "ThunderDedupe.App.1.0"
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+            except Exception:
+                pass
+
+            logger.info(f"已应用任务栏图标: {icon_path}")
+
         except Exception as e:
             logger.error(f"应用图标失败: {e}")
 
@@ -838,9 +1027,12 @@ class ConfigPage(QWidget):
             self.duration_spin.setValue(5)
             self.auto_scan_interval_spin.setValue(10)
             self.ws_port_spin.setValue(9876)
+            self.post_scan_spin.setValue(30)
 
             self.tray_icon_edit.clear()
             self.desktop_icon_edit.clear()
+            self.video_ext_edit.clear()
+            self.temp_ext_edit.clear()
 
             config.set("auto_start", False, auto_save=False)
             config.set("minimize_to_tray", False, auto_save=False)
@@ -849,9 +1041,14 @@ class ConfigPage(QWidget):
             config.set("ws_port", 9876, auto_save=False)
             config.set("tray_icon_path", "", auto_save=False)
             config.set("desktop_icon_path", "", auto_save=False)
+            config.set_extra_video_extensions("", auto_save=False)
+            config.set_extra_temp_extensions("", auto_save=False)
+            config.set("post_allow_scan_delay_seconds", 30, auto_save=False)
             config.save()
 
             db.execute("DELETE FROM file_index")
+            from core.index_manager import index_manager
+            index_manager.refresh_search_index()
             self._apply_runtime_settings()
 
             QMessageBox.information(self, "成功", "配置已重置")

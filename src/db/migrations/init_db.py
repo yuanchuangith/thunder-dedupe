@@ -56,6 +56,25 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_av_code ON file_index(av_code)
         """)
 
+        # 统一搜索索引表
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS search_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                av_code TEXT NOT NULL,
+                original_name TEXT,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                source TEXT NOT NULL,
+                status TEXT DEFAULT 'normal',
+                priority INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_search_index_av_code ON search_index(av_code)
+        """)
+
         # 拦截日志表
         conn.execute("""
             CREATE TABLE IF NOT EXISTS intercept_logs (
@@ -73,6 +92,61 @@ def init_database():
         # 创建时间索引
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_intercept_time ON intercept_logs(created_at)
+        """)
+
+        # 文件历史表 - 先删除旧表（可能有错误的 UNIQUE 约束）
+        # 检查是否有旧的 UNIQUE 约束在 av_code 上
+        try:
+            # 检查表是否存在且有错误的约束
+            result = conn.execute("PRAGMA table_info(file_history)").fetchall()
+            if result:
+                # 表存在，检查是否有数据
+                count = conn.execute("SELECT COUNT(*) FROM file_history").fetchone()[0]
+                if count > 0:
+                    # 有数据，先备份
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS file_history_backup AS
+                        SELECT * FROM file_history
+                    """)
+                # 删除旧表
+                conn.execute("DROP TABLE IF EXISTS file_history")
+        except:
+            pass
+
+        # 重新创建文件历史表（正确的结构）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS file_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                av_code TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL UNIQUE,
+                file_size INTEGER,
+                ext TEXT,
+                status TEXT DEFAULT 'normal',
+                first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                deleted_at DATETIME
+            )
+        """)
+
+        # 恢复备份数据（如果有）
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO file_history
+                SELECT * FROM file_history_backup
+            """)
+            conn.execute("DROP TABLE IF EXISTS file_history_backup")
+        except:
+            pass
+
+        # 创建番号索引（用于分组查询）
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_file_history_av ON file_history(av_code)
+        """)
+
+        # 创建状态索引
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_file_history_status ON file_history(status)
         """)
 
         conn.commit()

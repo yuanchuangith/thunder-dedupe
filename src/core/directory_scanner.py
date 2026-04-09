@@ -15,6 +15,7 @@ from db.database import db
 from core.av_parser import AVParser
 from utils.logger import logger
 from utils.utils import format_file_size
+from utils.config import config
 
 
 class DirectoryScanner(QObject):
@@ -26,11 +27,10 @@ class DirectoryScanner(QObject):
     scan_completed = pyqtSignal(int, int)  # 新增索引数, 总索引数
     scan_error = pyqtSignal(str)
 
-    # 支持的视频文件扩展名
-    VIDEO_EXTENSIONS = {
-        '.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov',
-        '.mpg', '.mpeg', '.m4v', '.rm', '.rmvb', '.ts', '.m2ts'
-    }
+    # 默认扩展名（配置未设置时使用）
+    DEFAULT_VIDEO_EXTENSIONS = set(config.get_default_video_extensions())
+
+    DEFAULT_TEMP_EXTENSIONS = set(config.get_default_temp_extensions())
 
     def __init__(self):
         super().__init__()
@@ -38,6 +38,10 @@ class DirectoryScanner(QObject):
         self._scanning = False
         self._stop_flag = False
         self._lock = threading.Lock()
+
+    def _get_extensions(self) -> set:
+        """从配置获取所有支持的扩展名"""
+        return config.get_video_extensions() | config.get_temp_extensions()
 
     def is_scanning(self) -> bool:
         """是否正在扫描"""
@@ -132,6 +136,9 @@ class DirectoryScanner(QObject):
             total_index = db.query_one("SELECT COUNT(*) as count FROM file_index")
             total_count = total_index['count'] if total_index else 0
 
+            from core.index_manager import index_manager
+            index_manager.refresh_search_index()
+
             logger.info(f"扫描完成，新增 {new_count} 条索引，总计 {total_count} 条")
 
             self._scanning = False
@@ -156,6 +163,8 @@ class DirectoryScanner(QObject):
             文件路径列表
         """
         files = []
+        extensions = self._get_extensions()
+
         try:
             p = Path(path)
             if not p.exists():
@@ -169,7 +178,7 @@ class DirectoryScanner(QObject):
 
                 if file_path.is_file():
                     ext = file_path.suffix.lower()
-                    if ext in self.VIDEO_EXTENSIONS:
+                    if ext in extensions:
                         files.append(str(file_path))
 
         except Exception as e:

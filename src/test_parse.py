@@ -36,6 +36,26 @@ def test_parse():
         print("-" * 30)
 
 
+def test_parse_filename():
+    """Test filename parsing with video/temp suffixes and bracketed codes"""
+    parser = AVParser()
+
+    test_cases = [
+        "[BOKD-086] 櫻井やえ 10回射精すまで終われまてん ついでに中出しも10発やっちゃいましたSP.mp4.bt.xltd",
+        "BOKD009.mp4.bt.xltd",
+    ]
+
+    print("\n" + "=" * 50)
+    print("Filename Parsing Test")
+    print("=" * 50)
+
+    for case in test_cases:
+        result = parser.parse_from_filename(case)
+        print(f"Input: {case}")
+        print(f"Output: {result}")
+        print("-" * 30)
+
+
 def test_normalize():
     """Test normalization"""
     test_cases = [
@@ -59,3 +79,5 @@ if __name__ == "__main__":
     test_normalize()
     print("\n")
     test_parse()
+    print("\n")
+    test_parse_filename()

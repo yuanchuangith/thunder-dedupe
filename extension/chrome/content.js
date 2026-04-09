@@ -602,9 +602,9 @@
     }
 
     if (exists) {
-      showNotification(`Code ${avCode} already exists: ${filePath}`, 'warning');
+      showNotification(`番号： ${avCode} 已存在: ${filePath}`, 'warning');
     } else if (avCode) {
-      showNotification(`Code ${avCode} not found. You can decide whether to allow it.`, 'info');
+      showNotification(`番号： ${avCode} 没有扫描到已存在文件`, 'info');
     } else {
       showNotification('Link intercepted. Waiting for desktop approval.', 'warning');
     }

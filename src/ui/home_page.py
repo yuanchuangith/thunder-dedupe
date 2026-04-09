@@ -29,6 +29,9 @@ class HomePage(QWidget):
     # 自动扫描间隔默认值（分钟）
     DEFAULT_AUTO_SCAN_INTERVAL_MINUTES = 10
 
+    # 允许下载后延迟扫描的默认时间（秒）
+    DEFAULT_POST_ALLOW_SCAN_DELAY_SECONDS = 30
+
     # 扫描完成信号
     scan_completed_signal = pyqtSignal()
 
@@ -47,6 +50,11 @@ class HomePage(QWidget):
         # 自动扫描定时器
         self.auto_scan_timer = QTimer()
         self.auto_scan_timer.timeout.connect(self._auto_scan)
+
+        # 允许下载后的延迟扫描定时器（防抖：多次触发只执行一次）
+        self._post_allow_scan_timer = QTimer()
+        self._post_allow_scan_timer.setSingleShot(True)  # 单次触发
+        self._post_allow_scan_timer.timeout.connect(self._do_post_allow_scan)
 
         # 连接扫描器信号
         scanner.scan_started.connect(self._on_scan_started)
@@ -84,6 +92,20 @@ class HomePage(QWidget):
     def _get_auto_scan_interval_ms(self) -> int:
         """获取自动扫描间隔（毫秒）。"""
         return self._get_auto_scan_interval_minutes() * 60 * 1000
+
+    def _get_post_allow_scan_delay_seconds(self) -> int:
+        """获取允许下载后延迟扫描的时间（秒）。"""
+        try:
+            delay = int(
+                config.get(
+                    "post_allow_scan_delay_seconds",
+                    self.DEFAULT_POST_ALLOW_SCAN_DELAY_SECONDS,
+                )
+            )
+        except (TypeError, ValueError):
+            delay = self.DEFAULT_POST_ALLOW_SCAN_DELAY_SECONDS
+
+        return max(5, delay)  # 最小5秒
 
     def reload_auto_scan_interval(self):
         """在配置保存后刷新自动扫描定时器。"""
@@ -611,6 +633,10 @@ class HomePage(QWidget):
             source="clipboard"
         )
 
+        # 如果用户允许下载，触发延迟扫描
+        if result == "allow":
+            self._schedule_post_allow_scan()
+
         # 刷新日志
         self._load_logs()
 
@@ -645,7 +671,25 @@ class HomePage(QWidget):
             }
         })
 
+        # 如果用户允许下载，触发延迟扫描
+        if result == "allow":
+            self._schedule_post_allow_scan()
+
         self._load_logs()
+
+    def _schedule_post_allow_scan(self):
+        """触发延迟扫描（防抖：多次调用只执行一次）"""
+        # 重新启动定时器，如果有正在等待的会取消并重新计时
+        delay_seconds = self._get_post_allow_scan_delay_seconds()
+        delay_ms = delay_seconds * 1000
+        self._post_allow_scan_timer.start(delay_ms)
+        logger.info(f"已安排 {delay_seconds}秒后扫描索引（防抖）")
+
+    def _do_post_allow_scan(self):
+        """执行允许下载后的延迟扫描"""
+        logger.info("执行允许下载后的延迟扫描")
+        self._auto_scan_silent = True
+        self._start_scan_internal()
 
     def _update_stats(self):
         """更新统计信息"""
@@ -687,9 +731,18 @@ class HomePage(QWidget):
             if status == "found":
                 status_item.setText("已存在")
                 status_item.setForeground(Qt.GlobalColor.darkGreen)
+            elif status == "history_found":
+                status_item.setText("历史存在")
+                status_item.setForeground(Qt.GlobalColor.darkYellow)
+            elif status == "history_deleted":
+                status_item.setText("历史存在(已删除)")
+                status_item.setForeground(Qt.GlobalColor.red)
             elif status == "not_found":
                 status_item.setText("未下载")
                 status_item.setForeground(Qt.GlobalColor.darkBlue)
+            elif status == "unparsed":
+                status_item.setText("未解析")
+                status_item.setForeground(Qt.GlobalColor.darkYellow)
             self.log_table.setItem(i, 2, status_item)
 
             # 来源

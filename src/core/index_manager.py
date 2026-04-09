@@ -31,6 +31,18 @@ class IndexManager:
         """
         normalized = normalize_av_code(av_code)
 
+        unified_row = db.query_one("""
+            SELECT id, av_code, original_name, file_path, file_size,
+                   source, status, created_at
+            FROM search_index
+            WHERE av_code = ?
+            ORDER BY priority DESC, file_size DESC, created_at DESC
+            LIMIT 1
+        """, (normalized,))
+
+        if unified_row:
+            return self._build_search_index_result(unified_row)
+
         row = db.query_one("""
             SELECT id, av_code, original_name, file_path, file_size, created_at
             FROM file_index
@@ -40,17 +52,69 @@ class IndexManager:
         """, (normalized,))
 
         if row:
-            return {
-                'id': row['id'],
-                'av_code': row['av_code'],
-                'original_name': row['original_name'],
-                'file_path': row['file_path'],
-                'file_size': row['file_size'],
-                'file_size_display': format_file_size(row['file_size'] or 0),
-                'created_at': row['created_at']
-            }
+            return self._build_index_result(row)
+
+        history_row = db.query_one("""
+            SELECT id, av_code, filename, file_path, file_size, status,
+                   first_seen_at, last_seen_at, deleted_at
+            FROM file_history
+            WHERE av_code = ?
+            ORDER BY status = 'normal' DESC, file_size DESC, last_seen_at DESC
+            LIMIT 1
+        """, (normalized,))
+
+        if history_row:
+            return self._build_history_result(history_row)
 
         return None
+
+    def refresh_search_index(self):
+        """Rebuild the unified search index from file_index and file_history."""
+        db.execute("DELETE FROM search_index")
+
+        db.execute("""
+            INSERT INTO search_index (
+                av_code, original_name, file_path, file_size,
+                source, status, priority, created_at
+            )
+            SELECT
+                av_code,
+                original_name,
+                file_path,
+                file_size,
+                'file_index',
+                'normal',
+                300,
+                created_at
+            FROM file_index
+        """)
+
+        db.execute("""
+            INSERT INTO search_index (
+                av_code, original_name, file_path, file_size,
+                source, status, priority, created_at
+            )
+            SELECT
+                fh.av_code,
+                fh.filename,
+                fh.file_path,
+                fh.file_size,
+                'file_history',
+                fh.status,
+                CASE WHEN fh.status = 'normal' THEN 200 ELSE 100 END,
+                COALESCE(fh.last_seen_at, fh.first_seen_at)
+            FROM file_history fh
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM file_index fi
+                WHERE fi.av_code = fh.av_code
+                  AND fi.file_path = fh.file_path
+            )
+        """)
+
+        total = db.query_one("SELECT COUNT(*) as count FROM search_index")
+        total_count = total['count'] if total else 0
+        logger.info(f"统一索引已刷新，共 {total_count} 条记录")
 
     def search_all_matches(self, av_code: str) -> List[Dict]:
         """
@@ -84,6 +148,57 @@ class IndexManager:
             })
 
         return results
+
+    def _build_index_result(self, row) -> Dict:
+        """Build a normalized search result from file_index."""
+        return {
+            'id': row['id'],
+            'av_code': row['av_code'],
+            'original_name': row['original_name'],
+            'file_path': row['file_path'],
+            'file_size': row['file_size'],
+            'file_size_display': format_file_size(row['file_size'] or 0),
+            'created_at': row['created_at'],
+            'match_source': 'file_index',
+            'history_status': 'normal',
+            'is_deleted': False,
+        }
+
+    def _build_search_index_result(self, row) -> Dict:
+        """Build a normalized search result from search_index."""
+        history_status = row['status'] or 'normal'
+        match_source = row['source'] or 'file_index'
+        return {
+            'id': row['id'],
+            'av_code': row['av_code'],
+            'original_name': row['original_name'],
+            'file_path': row['file_path'],
+            'file_size': row['file_size'],
+            'file_size_display': format_file_size(row['file_size'] or 0),
+            'created_at': row['created_at'],
+            'match_source': match_source,
+            'history_status': history_status,
+            'is_deleted': match_source == 'file_history' and history_status == 'deleted',
+        }
+
+    def _build_history_result(self, row) -> Dict:
+        """Build a normalized search result from file_history."""
+        history_status = row['status'] or 'normal'
+        return {
+            'id': row['id'],
+            'av_code': row['av_code'],
+            'original_name': row['filename'],
+            'file_path': row['file_path'],
+            'file_size': row['file_size'],
+            'file_size_display': format_file_size(row['file_size'] or 0),
+            'created_at': row['last_seen_at'] or row['first_seen_at'],
+            'first_seen_at': row['first_seen_at'],
+            'last_seen_at': row['last_seen_at'],
+            'deleted_at': row['deleted_at'],
+            'match_source': 'file_history',
+            'history_status': history_status,
+            'is_deleted': history_status == 'deleted',
+        }
 
     def add_index(self, file_path: str) -> bool:
         """
@@ -128,6 +243,7 @@ class IndexManager:
                 VALUES (?, ?, ?, ?)
             """, (av_code, filename, file_path, file_size))
 
+            self.refresh_search_index()
             logger.info(f"添加索引: {av_code} -> {filename}")
             return True
 
@@ -147,6 +263,7 @@ class IndexManager:
         """
         try:
             db.execute("DELETE FROM file_index WHERE id = ?", (index_id,))
+            self.refresh_search_index()
             return True
         except Exception as e:
             logger.error(f"删除索引失败: {e}")
@@ -164,6 +281,7 @@ class IndexManager:
         """
         try:
             db.execute("DELETE FROM file_index WHERE file_path = ?", (file_path,))
+            self.refresh_search_index()
             return True
         except Exception as e:
             logger.error(f"删除索引失败: {e}")
@@ -187,6 +305,7 @@ class IndexManager:
     def clear_all(self):
         """清空所有索引"""
         db.execute("DELETE FROM file_index")
+        self.refresh_search_index()
         logger.info("已清空所有索引")
 
     def get_stats(self) -> Dict:
@@ -258,6 +377,7 @@ class IndexManager:
         for id in result['invalid_ids']:
             db.execute("DELETE FROM file_index WHERE id = ?", (id,))
 
+        self.refresh_search_index()
         logger.info(f"清理了 {result['invalid']} 条无效索引")
         return result['invalid']
 

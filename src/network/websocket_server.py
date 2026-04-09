@@ -152,6 +152,9 @@ class WebSocketServer(QThread):
                     "file_path": result["file_path"],
                     "file_name": result["original_name"],
                     "file_size": result["file_size_display"],
+                    "match_source": result.get("match_source", "file_index"),
+                    "history_status": result.get("history_status", "normal"),
+                    "is_deleted": result.get("is_deleted", False),
                 },
             }
 

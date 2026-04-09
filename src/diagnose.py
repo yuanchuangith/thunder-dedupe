@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from db.database import db
 from db.migrations.init_db import init_database
+from utils.config import config
 
 
 def check_database():
@@ -74,11 +75,7 @@ def test_scan_path(path_str):
 
     print(f"Path exists: {path_str}")
 
-    # Count video files
-    video_extensions = {
-        '.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov',
-        '.mpg', '.mpeg', '.m4v', '.rm', '.rmvb', '.ts', '.m2ts'
-    }
+    extensions = config.get_video_extensions() | config.get_temp_extensions()
 
     count = 0
     sample_files = []
@@ -86,12 +83,12 @@ def test_scan_path(path_str):
     for file_path in path.rglob('*'):
         if file_path.is_file():
             ext = file_path.suffix.lower()
-            if ext in video_extensions:
+            if ext in extensions:
                 count += 1
                 if len(sample_files) < 5:
                     sample_files.append(str(file_path))
 
-    print(f"Found {count} video files")
+    print(f"Found {count} matching files")
 
     if sample_files:
         print("\nSample files:")

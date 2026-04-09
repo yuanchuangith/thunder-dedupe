@@ -5,12 +5,30 @@ echo Thunder Dedupe - Build Script
 echo ========================================
 echo.
 
-REM Set variables
-set PYTHON_ENV=D:\Anaconda\envs\checkcode
-set PYINSTALLER=%PYTHON_ENV%\Scripts\pyinstaller.exe
+REM Get project directory
 set PROJECT_DIR=%~dp0
 set DIST_DIR=%PROJECT_DIR%dist
 set SRC_DIR=%PROJECT_DIR%src
+set RUNTIME_HOOKS=%PROJECT_DIR%runtime_hooks\pyi_rth_sqlite3.py
+
+REM Conda environment path
+set PYTHON_ENV=D:\Anaconda\envs\checkcode
+set PYINSTALLER=%PYTHON_ENV%\Scripts\pyinstaller.exe
+set PYTHON_EXE=%PYTHON_ENV%\python.exe
+set LIB_BIN=%PYTHON_ENV%\Library\bin
+
+REM Check PyInstaller exists
+if not exist "%PYINSTALLER%" (
+    echo [ERROR] PyInstaller not found at: %PYINSTALLER%
+    echo Please check your Python environment.
+    pause
+    exit /b 1
+)
+
+echo Python: %PYTHON_EXE%
+echo PyInstaller: %PYINSTALLER%
+echo Project: %PROJECT_DIR%
+echo.
 
 REM Clean old build files
 echo [1/4] Cleaning old build files...
@@ -31,13 +49,14 @@ REM Run pyinstaller
     --distpath "%DIST_DIR%" ^
     --workpath "%PROJECT_DIR%build" ^
     --specpath "%PROJECT_DIR%build" ^
+    --runtime-hook "%RUNTIME_HOOKS%" ^
     --clean ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/sqlite3.dll;." ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/liblzma.dll;." ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/LIBBZ2.dll;." ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/libmpdec-4.dll;." ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/libexpat.dll;." ^
-    --add-binary "D:/Anaconda/envs/checkcode/Library/bin/ffi.dll;." ^
+    --add-binary "%LIB_BIN%\sqlite3.dll;." ^
+    --add-binary "%LIB_BIN%\liblzma.dll;." ^
+    --add-binary "%LIB_BIN%\LIBBZ2.dll;." ^
+    --add-binary "%LIB_BIN%\libmpdec-4.dll;." ^
+    --add-binary "%LIB_BIN%\libexpat.dll;." ^
+    --add-binary "%LIB_BIN%\ffi.dll;." ^
     "%SRC_DIR%\main.py"
 
 if %ERRORLEVEL% neq 0 (

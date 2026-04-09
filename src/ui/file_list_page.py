@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 
 from db.database import db
 from utils.logger import logger
+from utils.config import config
 from utils.utils import format_file_size
 
 
@@ -24,10 +25,9 @@ class FileListPage(QWidget):
     """文件列表页面"""
 
     # 支持的视频文件扩展名
-    VIDEO_EXTENSIONS = {
-        '.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov',
-        '.mpg', '.mpeg', '.m4v', '.rm', '.rmvb', '.ts', '.m2ts'
-    }
+    VIDEO_EXTENSIONS = set(config.get_default_video_extensions())
+
+    TEMP_EXTENSIONS = set(config.get_default_temp_extensions())
 
     def __init__(self):
         super().__init__()
@@ -186,6 +186,10 @@ class FileListPage(QWidget):
         # 创建索引加速搜索
         db.execute("CREATE INDEX IF NOT EXISTS idx_file_list_name ON file_list(name)")
 
+    def _get_extensions(self) -> set:
+        """浠庨厤缃幏鍙栭渶瑕佹壂鎻忕殑鎵╁睍鍚?"""
+        return config.get_video_extensions() | config.get_temp_extensions()
+
     def _initial_load(self):
         """初始加载"""
         self._init_table()
@@ -244,6 +248,7 @@ class FileListPage(QWidget):
             db.execute("DELETE FROM file_list")
 
             total_files = 0
+            extensions = self._get_extensions()
 
             for row in paths:
                 path = row['path']
@@ -259,7 +264,7 @@ class FileListPage(QWidget):
                     for file_path in p.rglob('*'):
                         if file_path.is_file():
                             ext = file_path.suffix.lower()
-                            if ext in self.VIDEO_EXTENSIONS:
+                            if ext in extensions:
                                 batch.append((
                                     file_path.name,
                                     str(file_path),
