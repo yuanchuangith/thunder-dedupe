@@ -59,3 +59,10 @@ dist/
 
 # Claude Code
 .claude/
+
+# Hugging Face & Model cache
+.hf-home/
+
+# Temporary directories
+src/tmp*/
+.codex-work/

@@ -12,11 +12,15 @@ from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QTab
 from db.migrations import init_database
 from ui.config_page import ConfigPage
 from ui.console_page import ConsolePage
+from ui.decode_page import DecodePage
+import ui.decode_page_overrides  # noqa: F401
 from ui.duplicate_page import DuplicatePage
 from ui.file_list_page import FileListPage
 from ui.file_history_page import FileHistoryPage
+from ui.compare_page import ComparePage
 from ui.home_page import HomePage
 from ui.rule_page import RulePage
+from ui.video_similarity_page import VideoSimilarityPage
 from core.index_manager import index_manager
 from utils.config import config
 from utils.logger import logger
@@ -37,8 +41,8 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self):
         self.setWindowTitle("迅雷去重助手")
-        self.setMinimumSize(800, 600)
-        self.resize(900, 700)
+        self.setMinimumSize(1100, 760)
+        self.resize(1280, 900)
 
         screen = self.screen().availableGeometry()
         x = (screen.width() - self.width()) // 2
@@ -89,6 +93,12 @@ class MainWindow(QMainWindow):
         self.file_history_page = FileHistoryPage()
         self.tab_widget.addTab(self.file_history_page, "文件历史")
 
+        self.compare_page = ComparePage()
+        self.tab_widget.addTab(self.compare_page, "对比")
+
+        self.decode_page = DecodePage()
+        self.tab_widget.addTab(self.decode_page, "Lada解码")
+
         self.duplicate_page = DuplicatePage()
         self.tab_widget.addTab(self.duplicate_page, "重复检测")
 
@@ -97,6 +107,9 @@ class MainWindow(QMainWindow):
 
         self.rule_page = RulePage()
         self.tab_widget.addTab(self.rule_page, "规则")
+
+        self.video_similarity_page = VideoSimilarityPage()
+        self.tab_widget.addTab(self.video_similarity_page, "视频相似度")
 
         self.console_page = ConsolePage()
         self.tab_widget.addTab(self.console_page, "系统日志")

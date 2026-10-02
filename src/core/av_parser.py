@@ -4,6 +4,7 @@
 AV code parsing engine.
 """
 import re
+import sqlite3
 from typing import List, Optional, Tuple
 
 from db.database import db
@@ -26,14 +27,18 @@ class AVParser:
 
     def _load_rules(self) -> List[Tuple[str, int]]:
         """Load parse rules from the database."""
-        rows = db.query(
-            """
-            SELECT pattern, priority, enabled
-            FROM parse_rules
-            WHERE enabled = 1
-            ORDER BY priority DESC
-            """
-        )
+        try:
+            rows = db.query(
+                """
+                SELECT pattern, priority, enabled
+                FROM parse_rules
+                WHERE enabled = 1
+                ORDER BY priority DESC
+                """
+            )
+        except sqlite3.OperationalError as exc:
+            logger.debug(f"Parse rules unavailable during startup: {exc}")
+            return []
         return [(row["pattern"], row["priority"]) for row in rows]
 
     def parse(self, text: str) -> Optional[str]:

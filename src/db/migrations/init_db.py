@@ -149,6 +149,97 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_file_history_status ON file_history(status)
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS decode_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL UNIQUE,
+                file_size INTEGER,
+                source_root TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                output_path TEXT,
+                compare_decoded_path TEXT,
+                db_record_path TEXT,
+                db_record_source TEXT,
+                is_visible INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                decoded_at DATETIME
+            )
+        """)
+
+        decode_columns = {row[1] for row in conn.execute("PRAGMA table_info(decode_tasks)").fetchall()}
+        if "compare_decoded_path" not in decode_columns:
+            conn.execute("ALTER TABLE decode_tasks ADD COLUMN compare_decoded_path TEXT")
+        if "db_record_path" not in decode_columns:
+            conn.execute("ALTER TABLE decode_tasks ADD COLUMN db_record_path TEXT")
+        if "db_record_source" not in decode_columns:
+            conn.execute("ALTER TABLE decode_tasks ADD COLUMN db_record_source TEXT")
+        if "is_visible" not in decode_columns:
+            conn.execute("ALTER TABLE decode_tasks ADD COLUMN is_visible INTEGER NOT NULL DEFAULT 1")
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_decode_tasks_status ON decode_tasks(status)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_decode_tasks_file_name ON decode_tasks(file_name)
+        """)
+
+        # 视频相似度检测相关表
+        # 视频信息表
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS video_similarity_videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                filename TEXT NOT NULL,
+                duration REAL,
+                file_size INTEGER,
+                format TEXT,
+                frame_count INTEGER,
+                phash_features BLOB,
+                clip_features BLOB,
+                scan_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+
+        # 相似度结果表
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS video_similarity_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_a_id INTEGER NOT NULL,
+                video_b_id INTEGER NOT NULL,
+                similarity_score REAL NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (video_a_id) REFERENCES video_similarity_videos(id),
+                FOREIGN KEY (video_b_id) REFERENCES video_similarity_videos(id),
+                UNIQUE(video_a_id, video_b_id)
+            )
+        """)
+
+        # 扫描路径配置表
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS video_similarity_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                enabled INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 创建索引
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_video_similarity_score
+            ON video_similarity_results(similarity_score DESC)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_video_similarity_status
+            ON video_similarity_results(status)
+        """)
+
         conn.commit()
 
     # 插入默认解析规则

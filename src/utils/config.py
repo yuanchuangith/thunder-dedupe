@@ -48,6 +48,19 @@ class Config:
         "scan_paths": [],
         "extra_video_extensions": "",
         "extra_temp_extensions": "",
+        "lada_cli_path": "lada-cli",
+        "lada_input_path": "",
+        "lada_output_path": "",
+        "lada_temp_dir": "",
+        "lada_output_file_pattern": "{orig_file_name}.restored.mp4",
+        "lada_device": "cuda",
+        "lada_fp16": True,
+        "lada_detection_model": "v4-fast",
+        "lada_restoration_model": "basicvsrpp-v1.2",
+        "lada_detect_face_mosaics": False,
+        "lada_max_clip_length": 180,
+        "lada_encoding_preset": "h264-cpu-fast",
+        "lada_mp4_fast_start": False,
     }
 
     def __new__(cls):
