@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QFrame, QLineEdit, QComboBox,
     QMessageBox, QProgressBar, QFileDialog, QTabWidget,
     QListWidget, QListWidgetItem, QSplitter, QDialog,
+    QCheckBox,
     QTextEdit, QScrollArea, QMenu
 )
 
@@ -363,12 +364,11 @@ class ComparePage(QWidget):
         export_btn.clicked.connect(self._export_result)
         layout.addWidget(export_btn)
 
-        # 一键删除全部（两边都有）
-        delete_all_both_btn = QPushButton("一键删除全部（两边都有）")
-        delete_all_both_btn.setFixedHeight(36)
-        delete_all_both_btn.setStyleSheet("""
+        delete_selected_btn = QPushButton("批量删除选中")
+        delete_selected_btn.setFixedHeight(36)
+        delete_selected_btn.setStyleSheet("""
             QPushButton {
-                background: #c0392b;
+                background: #d35400;
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -376,10 +376,11 @@ class ComparePage(QWidget):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QPushButton:hover { background: #a93226; }
+            QPushButton:hover { background: #ba4a00; }
         """)
-        delete_all_both_btn.clicked.connect(self._delete_all_both)
-        layout.addWidget(delete_all_both_btn)
+        delete_selected_btn.setToolTip("先在当前表格中按 Ctrl/Shift 多选行，再批量删除未解码文件")
+        delete_selected_btn.clicked.connect(self._delete_selected_rows)
+        layout.addWidget(delete_selected_btn)
 
         layout.addStretch()
 
@@ -845,7 +846,7 @@ class ComparePage(QWidget):
 
                 for file_path in path.rglob('*'):
                     if file_path.is_file() and file_path.suffix.lower() in {'.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov', '.restored', '.mpg', '.mpeg'}:
-                        av_code = self._parser.parse_from_filename(file_path.name)
+                        av_code = self._parser.parse_compare_code_from_filename(file_path.name)
                         if av_code:
                             if av_code not in undecoded_avs:
                                 undecoded_avs[av_code] = []
@@ -869,7 +870,7 @@ class ComparePage(QWidget):
 
                 for file_path in path.rglob('*'):
                     if file_path.is_file() and file_path.suffix.lower() in {'.mp4', '.mkv', '.avi', '.wmv', '.flv', '.mov', '.restored', '.mpg', '.mpeg'}:
-                        av_code = self._parser.parse_from_filename(file_path.name)
+                        av_code = self._parser.parse_compare_code_from_filename(file_path.name)
                         if av_code:
                             if av_code not in decoded_avs:
                                 decoded_avs[av_code] = []
@@ -1252,13 +1253,83 @@ class ComparePage(QWidget):
         # 显示文件名和父目录
         return f".../{path.parent.name}/{path.name}" if path.parent.name else path.name
 
+    def _collect_undecoded_file_info(self, file_path: str, av_code: str | None = None) -> Dict:
+        """构建未解码文件删除确认所需的数据。"""
+        file_data = self._file_data.get(file_path, {})
+        return {
+            'av_code': av_code or file_data.get('av_code') or '未知',
+            'undecoded_file': file_path,
+            'decoded_files': file_data.get('decoded_files', [])
+        }
+
+    def _get_active_result_table(self) -> QTableWidget:
+        """返回当前显示的结果表格。"""
+        current_widget = self.result_tabs.currentWidget()
+        if isinstance(current_widget, QTableWidget):
+            return current_widget
+        return self.both_table
+
+    def _clear_result_table_states(self):
+        """清空结果表格的选中和当前行状态。"""
+        for table in (self.both_table, self.undecoded_only_table, self.decoded_only_table):
+            selection_model = table.selectionModel()
+            if selection_model:
+                selection_model.clear()
+            table.clearSelection()
+            table.clearFocus()
+
+    def _delete_selected_rows(self):
+        """批量删除当前表格选中的未解码文件。"""
+        if not self._compare_result:
+            QMessageBox.warning(self, "提示", "请先执行对比")
+            return
+
+        table = self._get_active_result_table()
+        if table == self.decoded_only_table:
+            QMessageBox.warning(self, "提示", "当前表格没有可批量删除的未解码文件")
+            return
+
+        selection_model = table.selectionModel()
+        if not selection_model:
+            QMessageBox.warning(self, "提示", "当前没有可删除的选中行")
+            return
+
+        selected_rows = sorted(index.row() for index in selection_model.selectedRows())
+        if not selected_rows:
+            QMessageBox.warning(self, "提示", "请先在当前表格中选择要删除的行")
+            return
+
+        files_info = []
+        seen_paths = set()
+        for row in selected_rows:
+            av_item = table.item(row, 0)
+            undecoded_item = table.item(row, 1)
+            if not undecoded_item:
+                continue
+
+            file_path = undecoded_item.toolTip()
+            if not file_path or file_path == "-" or file_path in seen_paths:
+                continue
+
+            seen_paths.add(file_path)
+            av_code = av_item.text() if av_item else None
+            files_info.append(self._collect_undecoded_file_info(file_path, av_code))
+
+        if not files_info:
+            QMessageBox.warning(self, "提示", "选中行里没有可删除的未解码文件")
+            return
+
+        self._clear_result_table_states()
+        self._show_delete_detail_dialog(files_info)
+
     def _delete_undecoded_file(self, file_path: str):
         """删除未解码文件（二次确认）"""
+        self._clear_result_table_states()
         file_data = self._file_data.get(file_path, {})
         av_code = file_data.get('av_code', '未知')
         decoded_files = file_data.get('decoded_files', [])
 
-        # 使用自定义对话框显示详细信息
+        # 使用原有的单文件确认弹窗样式
         dialog = QDialog(self)
         dialog.setWindowTitle("删除确认")
         dialog.setMinimumSize(500, 350)
@@ -1328,6 +1399,8 @@ class ComparePage(QWidget):
         path_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         info_layout.addWidget(path_text)
 
+        delete_decoded_checkbox = None
+
         # 已解码文件提示
         if decoded_files:
             decoded_label = QLabel(f"✓ 已存在 {len(decoded_files)} 个已解码文件，可安全删除")
@@ -1335,7 +1408,7 @@ class ComparePage(QWidget):
             info_layout.addWidget(decoded_label)
 
             # 显示已解码文件路径（可点击预览）
-            for df in decoded_files[:3]:  #最多显示3个
+            for df in decoded_files[:3]:  # 最多显示3个
                 df_layout = QHBoxLayout()
                 df_path_label = QLabel(df)
                 df_path_label.setStyleSheet("font-size: 11px; color: #27ae60;")
@@ -1357,6 +1430,12 @@ class ComparePage(QWidget):
                 df_preview_btn.clicked.connect(lambda checked, f=df: self._preview_file_with_fallback(f, dialog))
                 df_layout.addWidget(df_preview_btn)
                 info_layout.addLayout(df_layout)
+
+            delete_decoded_checkbox = QCheckBox(f"同时删除已解码文件（{len(decoded_files)} 个）")
+            delete_decoded_checkbox.setChecked(False)
+            delete_decoded_checkbox.setStyleSheet("font-size: 13px; color: #2c3e50;")
+            delete_decoded_checkbox.setToolTip("默认不勾选；勾选后会连同该番号对应的已解码文件一起删除")
+            info_layout.addWidget(delete_decoded_checkbox)
 
         layout.addWidget(info_frame)
 
@@ -1403,9 +1482,15 @@ class ComparePage(QWidget):
         layout.addLayout(btn_layout)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            delete_decoded_files = bool(delete_decoded_checkbox and delete_decoded_checkbox.isChecked())
+            decoded_delete_count = len(decoded_files) if delete_decoded_files else 0
+
             # 第二次确认
             msg2 = (
                 "⚠️ 最终确认！\n\n"
+                f"未解码文件: 1 个\n"
+                f"已解码文件: {decoded_delete_count} 个\n"
+                f"总计删除: {1 + decoded_delete_count} 个文件\n\n"
                 f"文件: {Path(file_path).name}\n"
                 f"路径: {file_path}\n\n"
                 "此操作不可恢复，确定要删除吗？"
@@ -1419,10 +1504,18 @@ class ComparePage(QWidget):
             )
 
             if reply2 == QMessageBox.StandardButton.Yes:
-                self._do_delete_file(file_path)
+                if delete_decoded_files:
+                    files_to_delete = [file_path]
+                    for decoded_file in decoded_files:
+                        if decoded_file not in files_to_delete:
+                            files_to_delete.append(decoded_file)
+                    self._do_batch_delete(files_to_delete)
+                else:
+                    self._do_delete_file(file_path)
 
     def _delete_decoded_file(self, file_path: str):
         """删除已解码文件（仅当同一番号有>=2个未解码文件时允许）"""
+        self._clear_result_table_states()
         # 使用自定义对话框显示详细信息
         dialog = QDialog(self)
         dialog.setWindowTitle("删除已解码文件确认")
@@ -1612,40 +1705,6 @@ class ComparePage(QWidget):
         if deleted_count > 0:
             self._start_compare(show_complete_msg=False)
 
-    def _delete_all_both(self):
-        """一键删除全部两边都有（已匹配）的未解码文件"""
-        if not self._compare_result:
-            QMessageBox.warning(self, "提示", "请先执行对比")
-            return
-
-        result = self._compare_result
-        undecoded_avs = result.get('undecoded_avs', {})
-        decoded_avs = result.get('decoded_avs', {})
-        both_list = result.get('both', [])
-
-        if not both_list:
-            QMessageBox.warning(self, "提示", "没有两边都有的文件")
-            return
-
-        # 收集所有未解码文件及其对应的已解码文件
-        files_info = []
-        for av_code in both_list:
-            undecoded_files = undecoded_avs.get(av_code, [])
-            decoded_files = decoded_avs.get(av_code, [])
-            for u_file in undecoded_files:
-                files_info.append({
-                    'av_code': av_code,
-                    'undecoded_file': u_file,
-                    'decoded_files': decoded_files
-                })
-
-        if not files_info:
-            QMessageBox.warning(self, "提示", "没有可删除的文件")
-            return
-
-        # 弹出详细对话框显示要删除的文件列表
-        self._show_delete_detail_dialog(files_info)
-
     def _show_delete_detail_dialog(self, files_info: List[Dict]):
         """显示删除详情对话框"""
         dialog = QDialog(self)
@@ -1663,14 +1722,23 @@ class ComparePage(QWidget):
         layout.addWidget(title_label)
 
         # 提示
-        tip_label = QLabel("这些番号都有对应的已解码文件，可以安全删除")
+        matched_count = sum(1 for info in files_info if info.get('decoded_files'))
+        if matched_count:
+            tip_text = (
+                f"其中 {matched_count} 项已匹配到已解码文件。"
+                "最后一列可单独勾选，勾选后会连同该行已解码文件一起删除。"
+            )
+        else:
+            tip_text = "这些文件目前没有匹配到已解码文件，删除前请再次确认。"
+        tip_label = QLabel(tip_text)
         tip_label.setStyleSheet("font-size: 13px; color: #27ae60;")
+        tip_label.setWordWrap(True)
         layout.addWidget(tip_label)
 
         # 文件列表表格 - 显示完整路径
         table = QTableWidget()
-        table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(["番号", "待删除文件名", "待删除文件路径", "已解码文件"])
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["番号", "待删除文件名", "待删除文件路径", "已解码文件", "删已解码"])
 
         table.setStyleSheet("""
             QTableWidget {
@@ -1691,8 +1759,10 @@ class ComparePage(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         table.setColumnWidth(0, 100)
         table.setColumnWidth(1, 200)
+        table.setColumnWidth(4, 90)
 
         table.setRowCount(len(files_info))
         for i, info in enumerate(files_info):
@@ -1726,6 +1796,21 @@ class ComparePage(QWidget):
                 decoded_item = QTableWidgetItem("-")
             table.setItem(i, 3, decoded_item)
 
+            if decoded_files:
+                checkbox = QCheckBox("同时删")
+                checkbox.setChecked(False)
+                checkbox.setToolTip("勾选后，确认删除时会同时删除这行对应的已解码文件")
+                checkbox_widget = QWidget()
+                checkbox_layout = QHBoxLayout(checkbox_widget)
+                checkbox_layout.setContentsMargins(0, 0, 0, 0)
+                checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                checkbox_layout.addWidget(checkbox)
+                table.setCellWidget(i, 4, checkbox_widget)
+            else:
+                disabled_item = QTableWidgetItem("-")
+                disabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(i, 4, disabled_item)
+
             table.setRowHeight(i, 45)
 
         table.verticalHeader().setVisible(False)
@@ -1748,7 +1833,7 @@ class ComparePage(QWidget):
             }
             QPushButton:hover { background: #c0392b; }
         """)
-        confirm_btn.clicked.connect(lambda: self._confirm_delete_from_dialog(dialog, files_info))
+        confirm_btn.clicked.connect(lambda: self._confirm_delete_from_dialog(dialog, files_info, table))
         btn_layout.addWidget(confirm_btn)
 
         cancel_btn = QPushButton("取消")
@@ -1770,14 +1855,35 @@ class ComparePage(QWidget):
 
         dialog.exec()
 
-    def _confirm_delete_from_dialog(self, dialog: QDialog, files_info: List[Dict]):
+    def _confirm_delete_from_dialog(self, dialog: QDialog, files_info: List[Dict], table: QTableWidget):
         """从详情对话框确认删除"""
-        files_to_delete = [info['undecoded_file'] for info in files_info]
+        files_to_delete = []
+        decoded_files_to_delete = []
+        seen_undecoded = set()
+        seen_decoded = set()
+
+        for row, info in enumerate(files_info):
+            undecoded_file = info['undecoded_file']
+            if undecoded_file not in seen_undecoded:
+                seen_undecoded.add(undecoded_file)
+                files_to_delete.append(undecoded_file)
+
+            checkbox_widget = table.cellWidget(row, 4)
+            checkbox = checkbox_widget.findChild(QCheckBox) if checkbox_widget else None
+            if checkbox and checkbox.isChecked():
+                for decoded_file in info.get('decoded_files', []):
+                    if decoded_file not in seen_decoded:
+                        seen_decoded.add(decoded_file)
+                        decoded_files_to_delete.append(decoded_file)
+
+        total_delete_count = len(files_to_delete) + len(decoded_files_to_delete)
 
         # 二次确认
         msg = (
             "⚠️ 此操作不可恢复！\n\n"
-            f"确定要删除 {len(files_to_delete)} 个文件吗？\n"
+            f"未解码文件: {len(files_to_delete)} 个\n"
+            f"已解码文件: {len(decoded_files_to_delete)} 个\n"
+            f"总计删除: {total_delete_count} 个文件\n\n"
             "文件将永久从磁盘删除。"
         )
         reply = QMessageBox.warning(
@@ -1790,4 +1896,4 @@ class ComparePage(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             dialog.accept()
-            self._do_batch_delete(files_to_delete)
+            self._do_batch_delete(files_to_delete + decoded_files_to_delete)

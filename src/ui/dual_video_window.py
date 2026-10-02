@@ -7,12 +7,12 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QAction
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QAction, QMouseEvent, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QFrame, QSplitter, QWidget,
-    QMessageBox, QApplication, QStyle
+    QMessageBox, QApplication, QStyle, QStyleOptionSlider
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -26,8 +26,58 @@ except ImportError:
     HAS_SEND2TRASH = False
 
 
+class ClickSeekSlider(QSlider):
+    """支持点击轨道直接跳转到目标位置的进度条。"""
+
+    seekRequested = pyqtSignal(int)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        if self._handle_rect().contains(event.position().toPoint()):
+            super().mousePressEvent(event)
+            return
+
+        point = event.position().toPoint()
+        value = self._value_from_position(point)
+        self.setValue(value)
+        self.seekRequested.emit(value)
+        event.accept()
+
+    def _handle_rect(self):
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        return self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+
+    def _value_from_position(self, point) -> int:
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        if self.orientation() == Qt.Orientation.Horizontal:
+            position = point.x()
+            span = self.width()
+        else:
+            position = point.y()
+            span = self.height()
+        return QStyle.sliderValueFromPosition(
+            self.minimum(),
+            self.maximum(),
+            position,
+            max(1, span),
+            option.upsideDown,
+        )
+
+
 class VideoPlayerWidget(QWidget):
     """单个视频播放器组件"""
+
+    SEEK_STEP_MS = 3000
 
     def __init__(
         self,
@@ -160,8 +210,52 @@ class VideoPlayerWidget(QWidget):
         self.stop_btn.clicked.connect(self._stop)
         control_layout.addWidget(self.stop_btn)
 
+        # 快退 3 秒按钮
+        self.seek_back_btn = QPushButton("-3s")
+        self.seek_back_btn.setFixedSize(52, 32)
+        self.seek_back_btn.setAutoRepeat(True)
+        self.seek_back_btn.setAutoRepeatDelay(320)
+        self.seek_back_btn.setAutoRepeatInterval(120)
+        self.seek_back_btn.setStyleSheet("""
+            QPushButton {
+                background: #5d6d7e;
+                color: white;
+                border: none;
+                border-radius: 16px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #6c7a89; }
+            QPushButton:pressed { background: #4b5968; }
+        """)
+        self.seek_back_btn.setToolTip("后退 3 秒，按住可连续后退")
+        self.seek_back_btn.clicked.connect(lambda: self.seek_by(-self.SEEK_STEP_MS))
+        control_layout.addWidget(self.seek_back_btn)
+
+        # 快进 3 秒按钮
+        self.seek_forward_btn = QPushButton("+3s")
+        self.seek_forward_btn.setFixedSize(52, 32)
+        self.seek_forward_btn.setAutoRepeat(True)
+        self.seek_forward_btn.setAutoRepeatDelay(320)
+        self.seek_forward_btn.setAutoRepeatInterval(120)
+        self.seek_forward_btn.setStyleSheet("""
+            QPushButton {
+                background: #5d6d7e;
+                color: white;
+                border: none;
+                border-radius: 16px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #6c7a89; }
+            QPushButton:pressed { background: #4b5968; }
+        """)
+        self.seek_forward_btn.setToolTip("前进 3 秒，按住可连续前进")
+        self.seek_forward_btn.clicked.connect(lambda: self.seek_by(self.SEEK_STEP_MS))
+        control_layout.addWidget(self.seek_forward_btn)
+
         # 进度条
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
+        self.progress_slider = ClickSeekSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setRange(0, 0)
         self.progress_slider.setStyleSheet("""
             QSlider::groove:horizontal {
@@ -181,6 +275,7 @@ class VideoPlayerWidget(QWidget):
             }
         """)
         self.progress_slider.sliderMoved.connect(self._seek)
+        self.progress_slider.seekRequested.connect(self._seek)
         control_layout.addWidget(self.progress_slider, 1)
 
         # 时间显示
@@ -278,6 +373,17 @@ class VideoPlayerWidget(QWidget):
         """停止播放"""
         self.player.stop()
         self.progress_slider.setValue(0)
+
+    def seek_by(self, delta_ms: int):
+        """按指定毫秒数快进或快退。"""
+        duration = self.player.duration()
+        if duration <= 0:
+            return
+
+        current_position = self.player.position()
+        target_position = max(0, min(duration, current_position + delta_ms))
+        if target_position != current_position:
+            self._seek(target_position)
 
     def _seek(self, position: int):
         """跳转到指定位置 - 同时同步另一个播放器"""
@@ -430,6 +536,7 @@ class DualVideoCompareWindow(QDialog):
         self._judgment_text = judgment_text
         self._judgment_color = judgment_color
         self._result_status = result_status
+        self._seek_shortcut_step_ms = VideoPlayerWidget.SEEK_STEP_MS
 
         self.setWindowTitle("视频对比播放")
         self.setMinimumSize(1200, 700)
@@ -444,6 +551,7 @@ class DualVideoCompareWindow(QDialog):
         """)
 
         self._setup_ui()
+        self._setup_shortcuts()
         self._load_files()
 
         # 尝试最大化窗口并自动播放
@@ -694,6 +802,8 @@ class DualVideoCompareWindow(QDialog):
         tip_label = QLabel(
             "提示: 拖动任意一个进度条会同步另一个播放器到相同比例位置。"
             "可使用各自的播放控制按钮独立控制，或使用顶部按钮同时控制。"
+            "控制条里的 -3s / +3s 按钮点击一次跳 3 秒，按住可连续跳转；"
+            "左右方向键也可按 3 秒步进。"
         )
         tip_label.setStyleSheet("color: #bdc3c7; font-size: 12px;")
         tip_layout.addWidget(tip_label, 1)
@@ -734,6 +844,28 @@ class DualVideoCompareWindow(QDialog):
                 self, "提示",
                 f"已解码文件不存在:\n{self._decoded_path}\n\n将只播放未解码文件"
             )
+
+    def _setup_shortcuts(self):
+        """注册窗口级快捷键。"""
+        self.seek_backward_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        self.seek_backward_shortcut.setAutoRepeat(True)
+        self.seek_backward_shortcut.activated.connect(
+            lambda: self._sync_seek_by(-self._seek_shortcut_step_ms)
+        )
+
+        self.seek_forward_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        self.seek_forward_shortcut.setAutoRepeat(True)
+        self.seek_forward_shortcut.activated.connect(
+            lambda: self._sync_seek_by(self._seek_shortcut_step_ms)
+        )
+
+    def _sync_seek_by(self, delta_ms: int):
+        """同步快进或快退两个播放器。"""
+        primary_player = self.left_player
+        if primary_player.player.duration() <= 0 and self.right_player.player.duration() > 0:
+            primary_player = self.right_player
+
+        primary_player.seek_by(delta_ms)
 
     def _sync_play(self):
         """同时播放"""

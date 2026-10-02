@@ -934,6 +934,20 @@ def _open_manual_compare_from_inputs(self):
     self._open_task_compare_preview(left_path, right_path)
 
 
+def _open_single_task_preview(self, file_path: str):
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            QMessageBox.warning(self, "提示", f"文件不存在，无法预览：\n{file_path}")
+            return
+
+        subprocess.run(["cmd", "/c", "start", "", str(path)], check=False, **_subprocess_windowless_kwargs())
+        logger.info(f"打开 Lada 解码页单视频预览: {file_path}")
+    except Exception as exc:
+        logger.error(f"打开 Lada 解码页单视频预览失败: {exc}")
+        QMessageBox.warning(self, "预览失败", f"无法打开视频预览：\n{exc}")
+
+
 def _open_task_compare_preview(self, undecoded_path: str, decoded_path: str):
     try:
         undecoded_exists = Path(undecoded_path).exists()
@@ -1018,15 +1032,15 @@ def _build_command(self, task_input_path: str | None, strict: bool) -> list[str]
         "--output-file-pattern",
         output_pattern,
         "--device",
-        self.device_combo.currentText().strip(),
+        self._get_combo_value(self.device_combo),
         "--mosaic-detection-model",
-        self.detection_model_combo.currentText().strip(),
+        self._get_combo_value(self.detection_model_combo),
         "--mosaic-restoration-model",
-        self.restoration_model_combo.currentText().strip(),
+        self._get_combo_value(self.restoration_model_combo),
         "--max-clip-length",
         str(self.max_clip_spin.value()),
         "--encoding-preset",
-        self.encoding_preset_combo.currentText().strip(),
+        self._get_combo_value(self.encoding_preset_combo),
         "--fp16" if self.fp16_cb.isChecked() else "--no-fp16",
         "--detect-face-mosaics" if self.detect_face_cb.isChecked() else "--no-detect-face-mosaics",
         "--mp4-fast-start" if self.mp4_fast_start_cb.isChecked() else "--no-mp4-fast-start",
@@ -1984,11 +1998,15 @@ def _create_task_item_card(self, row) -> QFrame:
     )
     top_row.addWidget(select_cb, 0, Qt.AlignmentFlag.AlignTop)
 
-    if can_compare_preview:
+    if can_compare_preview or is_low_resolution:
         file_label = QPushButton(row["file_name"])
         file_label.setFlat(True)
         file_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        file_label.setToolTip("点击打开未解码和已解码文件的对比预览")
+        file_label.setToolTip(
+            "点击打开未解码和已解码文件的对比预览"
+            if can_compare_preview
+            else "点击使用系统播放器预览该低分辨率视频"
+        )
         file_label.setStyleSheet(
             """
             QPushButton {
@@ -2006,10 +2024,16 @@ def _create_task_item_card(self, row) -> QFrame:
             }
             """
         )
-        file_label.clicked.connect(
-            lambda checked=False, source=row["file_path"], target=preview_decoded_path:
-            self._open_task_compare_preview(source, target)
-        )
+        if can_compare_preview:
+            file_label.clicked.connect(
+                lambda checked=False, source=row["file_path"], target=preview_decoded_path:
+                self._open_task_compare_preview(source, target)
+            )
+        else:
+            file_label.clicked.connect(
+                lambda checked=False, source=row["file_path"]:
+                self._open_single_task_preview(source)
+            )
         top_row.addWidget(file_label, 1)
     else:
         file_label = QLabel(row["file_name"])
@@ -2204,6 +2228,7 @@ def apply_decode_page_overrides():
     DecodePage._select_manual_compare_left_file = _select_manual_compare_left_file
     DecodePage._select_manual_compare_right_file = _select_manual_compare_right_file
     DecodePage._open_manual_compare_from_inputs = _open_manual_compare_from_inputs
+    DecodePage._open_single_task_preview = _open_single_task_preview
     DecodePage._open_task_compare_preview = _open_task_compare_preview
     DecodePage._validate_global_options = _validate_global_options
     DecodePage._detect_video_resolution = _detect_video_resolution

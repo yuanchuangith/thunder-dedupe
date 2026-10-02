@@ -268,7 +268,7 @@ class DecodePage(QWidget):
         self.device_combo.currentIndexChanged.connect(self._update_command_preview)
         layout.addLayout(self._build_form_row("设备", self.device_combo))
 
-        self.encoding_preset_combo = self._create_select_combo(self.ENCODING_PRESETS)
+        self.encoding_preset_combo = self._create_select_combo(self.ENCODING_PRESETS, display_description=True)
         self.encoding_preset_combo.currentIndexChanged.connect(self._update_command_preview)
         layout.addLayout(self._build_form_row("编码预设", self.encoding_preset_combo))
 
@@ -750,7 +750,7 @@ class DecodePage(QWidget):
         self.device_combo.currentIndexChanged.connect(self._update_command_preview)
         layout.addLayout(self._build_form_row("设备", self.device_combo))
 
-        self.encoding_preset_combo = self._create_select_combo(self.ENCODING_PRESETS)
+        self.encoding_preset_combo = self._create_select_combo(self.ENCODING_PRESETS, display_description=True)
         self.encoding_preset_combo.currentIndexChanged.connect(self._update_command_preview)
         layout.addLayout(self._build_form_row("编码预设", self.encoding_preset_combo))
 
@@ -1121,16 +1121,16 @@ class DecodePage(QWidget):
         config.set("lada_output_path", self.output_path_edit.text().strip(), auto_save=False)
         config.set("lada_temp_dir", self.temp_dir_edit.text().strip(), auto_save=False)
         config.set("lada_output_file_pattern", self.output_pattern_edit.text().strip(), auto_save=False)
-        config.set("lada_detection_model", self.detection_model_combo.currentText().strip(), auto_save=False)
+        config.set("lada_detection_model", self._get_combo_value(self.detection_model_combo), auto_save=False)
         config.set(
             "lada_restoration_model",
-            self.restoration_model_combo.currentText().strip(),
+            self._get_combo_value(self.restoration_model_combo),
             auto_save=False,
         )
-        config.set("lada_device", self.device_combo.currentText().strip(), auto_save=False)
+        config.set("lada_device", self._get_combo_value(self.device_combo), auto_save=False)
         config.set(
             "lada_encoding_preset",
-            self.encoding_preset_combo.currentText().strip(),
+            self._get_combo_value(self.encoding_preset_combo),
             auto_save=False,
         )
         config.set("lada_fp16", self.fp16_cb.isChecked(), auto_save=False)
@@ -3418,15 +3418,15 @@ class DecodePage(QWidget):
             "--output-file-pattern",
             output_pattern,
             "--device",
-            self.device_combo.currentText().strip(),
+            self._get_combo_value(self.device_combo),
             "--mosaic-detection-model",
-            self.detection_model_combo.currentText().strip(),
+            self._get_combo_value(self.detection_model_combo),
             "--mosaic-restoration-model",
-            self.restoration_model_combo.currentText().strip(),
+            self._get_combo_value(self.restoration_model_combo),
             "--max-clip-length",
             str(self.max_clip_spin.value()),
             "--encoding-preset",
-            self.encoding_preset_combo.currentText().strip(),
+            self._get_combo_value(self.encoding_preset_combo),
             "--fp16" if self.fp16_cb.isChecked() else "--no-fp16",
             "--detect-face-mosaics" if self.detect_face_cb.isChecked() else "--no-detect-face-mosaics",
             "--mp4-fast-start" if self.mp4_fast_start_cb.isChecked() else "--no-mp4-fast-start",
@@ -3493,11 +3493,18 @@ class DecodePage(QWidget):
         return row["path"] if row else ""
 
     def _set_combo_value(self, combo: QComboBox, value: str):
-        index = combo.findText(value)
+        index = combo.findData(value, Qt.ItemDataRole.UserRole)
+        if index < 0:
+            index = combo.findText(value)
         if index >= 0:
             combo.setCurrentIndex(index)
         elif combo.count() > 0:
             combo.setCurrentIndex(0)
+
+    @staticmethod
+    def _get_combo_value(combo: QComboBox) -> str:
+        data = combo.currentData(Qt.ItemDataRole.UserRole)
+        return str(data).strip() if data is not None else combo.currentText().strip()
 
     @staticmethod
     def _create_card() -> QFrame:
@@ -3600,13 +3607,15 @@ class DecodePage(QWidget):
             row.addWidget(button)
         return row
 
-    def _create_select_combo(self, items) -> QComboBox:
+    def _create_select_combo(self, items, display_description: bool = False) -> QComboBox:
         combo = QComboBox()
         combo.setEditable(False)
         combo.setMinimumHeight(42)
         for value, description in items:
-            combo.addItem(value)
-            combo.setItemData(combo.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
+            display_text = description if display_description else value
+            combo.addItem(display_text, value)
+            tooltip_text = f"{description}\nPreset ID: {value}" if display_description else description
+            combo.setItemData(combo.count() - 1, tooltip_text, Qt.ItemDataRole.ToolTipRole)
         return combo
 
     @staticmethod

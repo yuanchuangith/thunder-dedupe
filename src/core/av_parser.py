@@ -165,6 +165,28 @@ class AVParser:
         clean_name = re.sub(r"[._]+", " ", clean_name)
         return self.parse(clean_name)
 
+    def parse_compare_code_from_filename(self, filename: str) -> Optional[str]:
+        """
+        Parse a stricter compare key from a filename.
+
+        The compare page should distinguish filenames like `BOKD-167-1`
+        and `BOKD-167-2` instead of collapsing both to `BOKD-167`.
+        """
+        av_code = self.parse_from_filename(filename)
+        if not av_code:
+            return None
+
+        for candidate in (av_code, av_code.replace("-", "")):
+            match = re.search(
+                rf"(?<![A-Z0-9]){re.escape(candidate)}-(\d{{1,2}})(?!\d)",
+                filename,
+                re.IGNORECASE,
+            )
+            if match:
+                return f"{av_code}-{match.group(1)}"
+
+        return av_code
+
     def refresh_rules(self):
         """Reload rules from the database."""
         self._rules = self._load_rules()
